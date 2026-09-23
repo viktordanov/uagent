@@ -1,0 +1,10 @@
+{
+  "action_ref": "1eafa1074276de37cb66a1e4644e70bc897504e3",
+  "binary_version": "0.6.0",
+  "expected_workflow": "# This workflow is managed by Memoria.\n# Change it with `memoria integrations github upgrade --apply`.\n# A manual edit makes the file modified, and Memoria then preserves it.\nname: Memoria documentation\non: [push, pull_request]\npermissions:\n  contents: read\njobs:\n  memoria:\n    runs-on: ubuntu-24.04\n    timeout-minutes: 10\n    steps:\n      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1\n        with:\n          persist-credentials: false\n      - name: Set up Memoria\n        id: memoria\n        uses: viktordanov/rs-memoria@1eafa1074276de37cb66a1e4644e70bc897504e3\n        with:\n          version: '0.6.0'\n      - run: memoria --version\n      - run: memoria check\n",
+  "installer_version": "0.6.0",
+  "runner": "ubuntu-24.04",
+  "schema_version": 1,
+  "template_version": 1,
+  "workflow_path": ".github/workflows/memoria.yml"
+}

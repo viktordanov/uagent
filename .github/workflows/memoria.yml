@@ -1,0 +1,22 @@
+# This workflow is managed by Memoria.
+# Change it with `memoria integrations github upgrade --apply`.
+# A manual edit makes the file modified, and Memoria then preserves it.
+name: Memoria documentation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  memoria:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Memoria
+        id: memoria
+        uses: viktordanov/rs-memoria@1eafa1074276de37cb66a1e4644e70bc897504e3
+        with:
+          version: '0.6.0'
+      - run: memoria --version
+      - run: memoria check

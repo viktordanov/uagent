@@ -1,0 +1,16 @@
+version = 2
+
+# Source, tests, fixtures, and configuration stay covered. go.sum is a redundant dependency lockfile.
+ignore = ["go.sum"]
+include = []
+
+[documentation]
+guidance = []
+guidance_files = ["docs/documentation/writing.md", "docs/documentation/sections.md"]
+
+[fingerprints]
+default = "raw"
+languages = {}
+
+[lint]
+missing_import_hint = true
