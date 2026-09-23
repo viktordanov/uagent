@@ -15,12 +15,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/viktordanov/uagent/domain"
-	"github.com/viktordanov/uagent/preflight"
-	"github.com/viktordanov/uagent/render"
-	"github.com/viktordanov/uagent/runner"
-	"github.com/viktordanov/uagent/runstore"
-	"github.com/viktordanov/uagent/statedir"
+	"github.com/viktordanov/uagent/core"
+	"github.com/viktordanov/uagent/harness"
 	"github.com/viktordanov/uagent/stream"
 )
 
@@ -93,7 +89,7 @@ func runFlags() []cli.Flag {
 		&cli.StringFlag{Name: "workspace", Aliases: []string{"C"}, Usage: "agent workspace and Bash working directory", Value: ".", TakesFile: true},
 		&cli.StringFlag{
 			Name: "state-dir", Usage: "sessions, logs, and run records; must be outside the workspace",
-			Value: statedir.Default(), Sources: cli.EnvVars("UAGENT_STATE_DIR"), TakesFile: true,
+			Value: harness.DefaultStateDir(), Sources: cli.EnvVars("UAGENT_STATE_DIR"), TakesFile: true,
 		},
 		&cli.StringFlag{Name: "session", Usage: "session ID to create or resume", DefaultText: "new UUID"},
 		&cli.StringFlag{Name: "system-prompt", Usage: "replace the default system prompt"},
@@ -137,7 +133,7 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve state dir: %w", err)
 	}
-	bin, err := runner.Resolve(cmd.String("runner"))
+	bin, err := harness.FindRunner(cmd.String("runner"))
 	if err != nil {
 		return usageError("%v", err)
 	}
@@ -148,14 +144,9 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevels[cmd.String("log-level")]}))
-	layout := statedir.Layout{Root: stateDir}
-	svc := domain.NewRunService(
-		preflight.New(preflight.Config{StateDir: stateDir}),
-		runner.New(runner.Config{Bin: bin, Layout: layout, MaxDisk: maxDisk, Logger: logger}),
-		runstore.New(layout),
-	)
+	h := harness.New(harness.Config{RunnerPath: bin, StateDir: stateDir, MaxDisk: maxDisk, Logger: logger})
 
-	req := domain.RunRequest{
+	req := core.Request{
 		SessionID:       cmd.String("session"),
 		Prompt:          prompt,
 		Provider:        provider,
@@ -170,19 +161,19 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 		AllowDotenv:     cmd.Bool("allow-dotenv"),
 	}
 
-	pal := render.PaletteFor(os.Stderr)
+	pal := PaletteFor(os.Stderr)
 	streaming := cmd.Bool("stream")
-	var sink domain.EventSink = discard{}
+	sink := core.Sink(func(core.Event) {})
 	var streamSink *stream.Sink
 	switch {
 	case streaming:
 		streamSink = stream.NewSink(os.Stdout)
-		sink = streamSink
+		sink = streamSink.Emit
 	case !cmd.Bool("quiet"):
-		sink = render.NewProgress(os.Stderr, pal, cmd.Bool("verbose"))
+		sink = NewProgress(os.Stderr, pal, cmd.Bool("verbose")).Emit
 	}
 
-	result, err := svc.Run(ctx, req, sink)
+	result, err := h.Run(ctx, req, sink)
 	if err != nil {
 		return fmt.Errorf("failed to run: %w", err)
 	}
@@ -192,13 +183,13 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 			return err
 		}
 	}
-	runDir := layout.RunDir(result.Request.RunID)
+	runDir := h.RunDir(result.Request.RunID)
 	if !streaming {
-		if result.Status == domain.StatusFailed && len(result.Stats.Errors) == 0 {
-			printStderrTail(os.Stderr, filepath.Join(runDir, statedir.StderrFile), pal)
+		if result.Status == core.StatusFailed && len(result.Stats.Errors) == 0 {
+			printStderrTail(os.Stderr, filepath.Join(runDir, harness.StderrFile), pal)
 		}
 		fmt.Fprintln(os.Stderr)
-		render.Summary(os.Stderr, result, runDir, pal)
+		Summary(os.Stderr, result, runDir, pal)
 		if err := printResult(os.Stdout, result, cmd.Bool("json")); err != nil {
 			return err
 		}
@@ -214,46 +205,25 @@ func statsAction(_ context.Context, cmd *cli.Command) error {
 	if cmd.Args().Len() != 1 {
 		return usageError("usage: uagent stats [--json] <run-dir|events.jsonl>")
 	}
-	path, runDir := cmd.Args().First(), ""
-	var result domain.RunResult
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		runDir = path
-		saved, found, err := runstore.LoadSummary(runDir)
-		if err != nil {
-			return fmt.Errorf("failed to load run: %w", err)
-		}
-		if found {
-			result = saved
-		}
-		path = filepath.Join(runDir, statedir.EventsFile)
-	}
-	f, err := os.Open(path)
+	path := cmd.Args().First()
+	result, err := harness.Load(path)
 	if err != nil {
-		return fmt.Errorf("failed to open events: %w", err)
-	}
-	defer f.Close()
-	collector := domain.NewStatsCollector()
-	if err := runner.ReadEvents(f, collector.Add); err != nil {
-		return fmt.Errorf("failed to read events: %w", err)
-	}
-	result.Stats, result.Answer = collector.Stats(), collector.Answer()
-	if result.Status == "" {
-		result.Status = domain.StatusOK
-		if collector.HasError() {
-			result.Status = domain.StatusFailed
-		}
-		result.Wall = result.Stats.EventSpan
+		return fmt.Errorf("failed to load run: %w", err)
 	}
 	if cmd.Bool("json") {
 		return printResult(os.Stdout, result, true)
 	}
-	render.Summary(os.Stdout, result, runDir, render.PaletteFor(os.Stdout))
+	runDir := ""
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		runDir = path
+	}
+	Summary(os.Stdout, result, runDir, PaletteFor(os.Stdout))
 
 	return nil
 }
 
 // logRun emits one wide event per run for diagnostics (visible at --log-level info).
-func logRun(ctx context.Context, logger *slog.Logger, r domain.RunResult) {
+func logRun(ctx context.Context, logger *slog.Logger, r core.Result) {
 	logger.LogAttrs(ctx, slog.LevelInfo, "run finished",
 		slog.String("run_id", r.Request.RunID),
 		slog.String("session_id", r.Request.SessionID),
@@ -269,7 +239,7 @@ func logRun(ctx context.Context, logger *slog.Logger, r domain.RunResult) {
 	)
 }
 
-func printResult(w io.Writer, r domain.RunResult, asJSON bool) error {
+func printResult(w io.Writer, r core.Result, asJSON bool) error {
 	if !asJSON {
 		if r.Answer != "" {
 			fmt.Fprintln(w, r.Answer)
@@ -285,10 +255,6 @@ func printResult(w io.Writer, r domain.RunResult, asJSON bool) error {
 
 	return nil
 }
-
-type discard struct{}
-
-func (discard) Emit(domain.Event) {}
 
 func onUsageError(_ context.Context, _ *cli.Command, err error, _ bool) error {
 	return usageError("%v (see --help)", err)
@@ -337,7 +303,7 @@ func readPrompt(args []string) (string, error) {
 	return prompt, nil
 }
 
-func printStderrTail(w io.Writer, path string, pal render.Palette) {
+func printStderrTail(w io.Writer, path string, pal Palette) {
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
 		return

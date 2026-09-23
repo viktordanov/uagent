@@ -1,22 +1,28 @@
-<!-- memoria:section id="overview" files="go.mod" -->
+<!-- memoria:section id="overview" files="go.mod harness/harness.go" -->
 # uagent
 
 <!-- memoria:export id="summary" -->
-uagent runs one unreal-agent-runner task with safety guards, shows readable progress, prints the final answer, and records statistics for each run so the runner can be compared with codex exec and claude -p.
+uagent is a wrapper around unreal-agent-runner that adds safety guards and everyday ergonomics while staying as close to the original runner as possible.
 <!-- /memoria:export -->
 
-1. [Install](#install)
-2. [Run a task](#run-a-task)
-3. [Guards](#guards)
-4. [Run records](#run-records)
-5. [Packages](#packages)
+1. [Why a wrapper](#why-a-wrapper)
+2. [Install](#install)
+3. [Run a task](#run-a-task)
+4. [What uagent adds](#what-uagent-adds)
+5. [Use it from Go](#use-it-from-go)
 6. [Development](#development)
 
-[unreal-agent-runner](https://github.com/unreallabsai/unreal-agent) is the headless runner of Unreal Agent, a Go agent harness whose tool calls run asynchronously.
-It runs one task, writes session items as JSONL, and exits. uagent wraps it with the guards the runner lacks and turns its output into progress, an answer, and comparable statistics.
+## Why a wrapper
+
+[unreal-agent-runner](https://github.com/unreallabsai/unreal-agent) is the headless runner of Unreal Agent, a Go agent harness whose tool calls run in the background while the model keeps working.
+It runs one task from a JSON request, writes session items as JSONL, and exits, much like `codex exec` or `claude -p`.
+
+The runner is capable but raw. It stores sessions inside the workspace, loads the workspace `.env`, has no overall timeout, and prints session items rather than an answer.
+uagent keeps the runner itself unchanged: the same request fields reach it on stdin, its output is saved byte for byte, and nothing is added to the prompt.
+What uagent adds sits around the runner: guards before and during the run, readable progress, a plain answer on stdout, and a record of every run.
 <!-- /memoria:section -->
 
-<!-- memoria:section id="usage" files="go.mod" -->
+<!-- memoria:section id="usage" files="go.mod cmd/uagent/app.go" -->
 ## Install
 
 ```sh
@@ -28,101 +34,84 @@ codex login   # for the default openai-codex provider
 ## Run a task
 
 ```sh
-uagent -e xhigh "Summarize this project."
-uagent -e medium -t 20m -C ~/code/proj "Fix the failing test in pkg/foo"
-uagent --json "..." | jq .stats.tokens            # answer and statistics as JSON
-uagent --stream "..."                              # JSONL events for another program
+uagent "Summarize this project."
+uagent -e xhigh -t 20m -C ~/code/proj "Fix the failing test in pkg/foo"
+echo "Explain the build" | uagent -q
+uagent --json "..." | jq .stats.tokens     # answer and statistics as JSON
+uagent --stream "..."                       # JSONL events for another program
 uagent stats ~/.local/state/unreal-agent/runs/<run-id>
 ```
 
-The default provider is `openai-codex` with `gpt-6-sol`. `uagent --help` lists every flag.
-Progress and the summary go to stderr; stdout carries only the answer, the summary JSON, or the event stream.
-<!-- /memoria:section -->
+The default provider is `openai-codex` with `gpt-6-sol`. Flags can come before or after the prompt, and `uagent --help` lists them all.
+`--provider`, `--model`, and `--base-url` also read the runner's own `UNREAL_HARNESS_LLM_*` variables.
 
-<!-- memoria:section id="contract" files="go.mod" -->
-## Guards
-
-| Risk | What uagent does |
-| --- | --- |
-| Session output inside the workspace grows without limit (unreal-agent issue #3) | Sessions and logs live in `~/.local/state/unreal-agent`. A state directory inside the workspace is refused, and `--max-disk` (default 5G) kills a run whose tool output grows past the limit. |
-| A workspace `.env` redirects the endpoint or credentials (issue #5) | A `.env` that sets `UNREAL_HARNESS_*`, `OPENAI_CODEX_*`, `CODEX_HOME`, or `*_PROXY` blocks the run unless `--allow-dotenv` is given. Provider, model, and base URL are always pinned for the runner. |
-| No per-command timeout | `--timeout` (default 30m) stops the runner and every background tool process group: SIGTERM, then SIGKILL. |
-| The runner does not refresh Codex tokens | An expired token blocks the run before it starts; a token that expires within an hour produces a warning. |
+| Output mode | Stdout | Stderr |
+| --- | --- | --- |
+| default | the final answer | progress, then a summary |
+| `-q` | the final answer | the summary |
+| `--json` | the summary with the answer, as JSON | progress, then the summary |
+| `--stream` | versioned JSONL events | diagnostics only |
 
 Exit codes: 0 ok, 1 failed, 2 usage or preflight, 3 disk limit, 124 timeout, 130 interrupted.
-
-## Run records
-
-Each run gets `~/.local/state/unreal-agent/runs/<run-id>/` with `request.json`, the raw runner output in `events.jsonl`, `stderr.log`, and `summary.json`.
-The summary records wall time, model time, tool busy time, tool time that overlapped model time, turns, tool calls by name, failed calls, parallelism, and tokens.
 <!-- /memoria:section -->
 
-## Packages
+<!-- memoria:section id="contract" files="harness/preflight.go harness/process.go harness/state.go" -->
+## What uagent adds
 
-`domain` is the pure core. The other packages are adapters for its ports, and `cmd/uagent` wires them together.
+### Safety guards
 
-### [cmd/uagent](cmd/uagent/README.md)
-<!-- memoria:import src="cmd/uagent/README.md#summary" -->
-The uagent command is the composition root: it defines the CLI with urfave/cli v3, wires the adapters into the domain run service, chooses the output mode, and maps outcomes to exit codes.
-<!-- /memoria:import -->
+| Runner behavior | Guard |
+| --- | --- |
+| Sessions stored in the workspace can be read back by the agent's own background searches and grow without limit (unreal-agent issue #3). | Sessions, logs, and run records live in `~/.local/state/unreal-agent`. A state directory inside the workspace is refused. `--max-disk` (default 5G) stops a run whose tool output grows past the limit. |
+| The workspace `.env` is loaded and can redirect the model endpoint or credentials (issue #5). | A `.env` that sets `UNREAL_HARNESS_*`, `OPENAI_CODEX_*`, `CODEX_HOME`, or `*_PROXY` blocks the run unless `--allow-dotenv` is given. Provider, model, and base URL are always set explicitly for the runner, so a `.env` cannot override them. |
+| No overall time limit, and background tools can outlive a run. | `--timeout` (default 30m) stops the runner and every background tool process group, first with SIGTERM and then SIGKILL. Tools still running after the runner exits on its own are killed too. |
+| Codex tokens are never refreshed. | An expired token stops the run before it starts; a token that expires within an hour produces a warning. |
 
-### [domain](domain/README.md)
-<!-- memoria:import src="domain/README.md#summary" -->
-The domain package holds uagent's core model: run requests and results, normalized run events, statistics, and the run service with its ports. It depends only on the Go standard library and uuid.
-<!-- /memoria:import -->
+### Ergonomics
 
-### [runner](runner/README.md)
-<!-- memoria:import src="runner/README.md#summary" -->
-The runner package drives unreal-agent-runner as a subprocess, turns its JSONL output into domain events, and stops the runner and its background tools on timeout, interrupt, or runaway disk use.
-<!-- /memoria:import -->
+- A plain answer on stdout, with progress and a summary on stderr, so uagent composes with pipes and scripts.
+- A prompt from an argument or stdin, sensible defaults, and flags that validate their values.
+- A record of every run in `~/.local/state/unreal-agent/runs/<run-id>/`: `request.json`, the raw runner output in `events.jsonl`, `stderr.log`, and `summary.json`.
+- Statistics for comparing the runner with other agents: wall time, model time, tool busy time, tool time that overlapped model time, turns, tool calls and failures, parallelism, and tokens.
+<!-- /memoria:section -->
 
-### [preflight](preflight/README.md)
-<!-- memoria:import src="preflight/README.md#summary" -->
-The preflight package checks the workspace, the state directory, the workspace .env file, and provider credentials before a run, and reports each problem as a domain finding.
-<!-- /memoria:import -->
+<!-- memoria:section id="library" files="core/run.go core/event.go core/stats.go core/finding.go harness/harness.go harness/state.go harness/decode.go" -->
+## Use it from Go
 
-### [stream](stream/README.md)
+The CLI is a thin layer over two packages, and a TUI or another tool can use them directly:
+
+- `core` is the pure model: `Request`, `Result`, the run events, `StatsCollector`, and the rules for findings and outcomes. It does no I/O.
+- `harness` runs the runner with every guard. `New(Config)` returns a `Harness`; `Run(ctx, request, sink)` streams events to `sink` and returns the `Result`. `Preflight` checks a request without running it, `History` lists saved runs, and `Load` reopens one.
+
+```go
+h := harness.New(harness.Config{RunnerPath: runner, StateDir: harness.DefaultStateDir()})
+result, err := h.Run(ctx, core.Request{Prompt: "Summarize this project.", Provider: "openai-codex",
+	Model: "gpt-6-sol", Effort: "high", Workspace: dir}, func(e core.Event) { /* update the UI */ })
+```
+
+`Run` sends `RunStarted` first and `RunFinished` last for every run that starts, and it is safe to call concurrently.
+Programs in other languages use the stream instead:
+
 <!-- memoria:import src="stream/README.md#summary" -->
-The stream package writes run events as versioned JSONL for `uagent --stream`. It is the contract for programs that drive uagent, such as rs-uagent-tui.
+The stream package writes run events as versioned JSONL for `uagent --stream`. It is the contract for programs that drive uagent from outside Go.
 <!-- /memoria:import -->
+<!-- /memoria:section -->
 
-### [render](render/README.md)
-<!-- memoria:import src="render/README.md#summary" -->
-The render package formats run events and summaries for people reading a terminal: live progress lines and the end-of-run summary block.
-<!-- /memoria:import -->
-
-### [runstore](runstore/README.md)
-<!-- memoria:import src="runstore/README.md#summary" -->
-The runstore package saves each finished run as summary.json in its run directory and loads saved summaries for uagent stats.
-<!-- /memoria:import -->
-
-### [statedir](statedir/README.md)
-<!-- memoria:import src="statedir/README.md#summary" -->
-The statedir package defines where uagent keeps runner sessions, logs, and per-run records, always outside the agent workspace.
-<!-- /memoria:import -->
-
-### [testing](testing/README.md)
-<!-- memoria:import src="testing/README.md#summary" -->
-The testing directory holds deterministic fixtures (captured runner output and event builders) and the generated mocks used by the unit tests.
-<!-- /memoria:import -->
-
-### [docs](docs/README.md)
-<!-- memoria:import src="docs/README.md#summary" -->
-Architecture rules, writing guidance, section conventions, and the Memoria review procedure for uagent.
-<!-- /memoria:import -->
-
-<!-- memoria:section id="development" files="generate.go .golangci.yml .mockery.yaml .github/workflows/ci.yml .github/workflows/memoria.yml" -->
+<!-- memoria:section id="development" files=".golangci.yml .github/workflows/ci.yml .github/workflows/memoria.yml" -->
 ## Development
 
 ```sh
-go generate ./...          # mockery v3 mocks into testing/mocks (not committed)
-go test ./...              # add -short to skip subprocess tests
-golangci-lint run ./...    # aicore's linter set plus sloglint, formatted with gofumpt
+go test ./...              # unit, golden, and end-to-end tests; no model or tokens needed
+golangci-lint run ./...    # the aicore linter set plus sloglint, formatted with gofumpt
 memoria check              # documentation freshness
 ```
 
-CI runs the same steps on every pull request and push to `main`: mock generation, build, race-enabled tests, and golangci-lint in [ci.yml](.github/workflows/ci.yml), and `memoria check` in the Memoria-managed [memoria.yml](.github/workflows/memoria.yml).
+The tests replay real runner output through a fake runner:
 
-The [architecture rules](docs/documentation/architecture.md) describe the domain, adapter, and composition-root layout.
-Every README is kept in step with its code by Memoria. The [documentation guide](docs/README.md) explains the conventions and the review procedure.
+<!-- memoria:import src="testing/README.md#summary" -->
+Real captured runner output, a fake runner that replays it with its original timing, and golden files, so uagent is tested end to end without a model or tokens.
+<!-- /memoria:import -->
+
+CI runs the build, the race-enabled tests, and golangci-lint in [ci.yml](.github/workflows/ci.yml), and `memoria check` in the Memoria-managed [memoria.yml](.github/workflows/memoria.yml).
+The [architecture notes](docs/documentation/architecture.md) explain the layout, and the [documentation guide](docs/README.md) explains how the READMEs are maintained.
 <!-- /memoria:section -->

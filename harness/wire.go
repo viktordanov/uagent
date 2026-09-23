@@ -1,13 +1,13 @@
-package runner
+package harness
 
 import (
 	"encoding/json"
 	"time"
 
-	"github.com/viktordanov/uagent/domain"
+	"github.com/viktordanov/uagent/core"
 )
 
-// Wire types for unreal-agent-runner v0.1.x. Each stdout line is either a
+// Wire types for unreal-agent-runner v0.1.x stdout, stdin, and session files. Each stdout line is either a
 // session item (Sequence/RecordedAt/Kind/Data) or {"type":"error"}.
 
 type requestDTO struct {
@@ -20,7 +20,7 @@ type requestDTO struct {
 	MaxAttempts     int      `json:"max_attempts,omitempty"`
 }
 
-func requestToDTO(req domain.RunRequest) requestDTO {
+func requestToDTO(req core.Request) requestDTO {
 	return requestDTO{
 		Prompt:          req.Prompt,
 		ThinkingLevel:   req.Effort,
@@ -83,8 +83,8 @@ type usageDTO struct {
 	ReasoningTokens       int64 `json:"ReasoningTokens"`
 }
 
-func (u usageDTO) toDomain() domain.Tokens {
-	return domain.Tokens{
+func (u usageDTO) toCore() core.Tokens {
+	return core.Tokens{
 		InputTokens:           u.InputTokens,
 		CachedInputTokens:     u.CachedInputTokens,
 		CacheWriteInputTokens: u.CacheWriteInputTokens,

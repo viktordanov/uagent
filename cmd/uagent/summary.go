@@ -1,4 +1,4 @@
-package render
+package main
 
 import (
 	"fmt"
@@ -9,17 +9,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/viktordanov/uagent/domain"
+	"github.com/viktordanov/uagent/core"
 )
 
 // Summary prints the end-of-run summary block.
-func Summary(w io.Writer, r domain.RunResult, runDir string, pal Palette) {
+func Summary(w io.Writer, r core.Result, runDir string, pal Palette) {
 	row := func(label, value string) { fmt.Fprintf(w, "%s %s\n", pal.Dim(fmt.Sprintf("%-8s", label)), value) }
 	s := r.Stats
 
 	fmt.Fprintln(w, pal.Dim("──────── uagent summary ────────"))
 	status := pal.Red(string(r.Status))
-	if r.Status == domain.StatusOK {
+	if r.Status == core.StatusOK {
 		status = pal.Green(string(r.Status))
 	}
 	row("status", fmt.Sprintf("%s · runner exit %d", status, r.RunnerExitCode))

@@ -1,16 +1,21 @@
 # uagent architecture
 
-uagent follows a domain, adapter, and composition-root layout. These rules apply to every change.
+uagent is a CLI with a small pure core and well-organized infrastructure around it.
 
-- `domain/` is pure: entities, events, `RunService`, `StatsCollector`, and ports (`Runner`, `Preflight`, `RunStore`, `EventSink`). Standard library and `uuid` only; no `os`, `os/exec`, `encoding/json`, `slog`, or struct tags.
-- Adapters implement ports or transform domain types for a boundary: `runner/` (subprocess, JSONL decoding), `preflight/`, `runstore/`, `statedir/`, `stream/` (versioned JSONL contract), `render/` (terminal output). Wire DTOs with `json` tags live in each adapter's `serialization.go`.
-- `cmd/uagent/` is the composition root: flags, wiring, logger, exit codes. `main` owns the only `os.Exit`.
-- Services: unexported struct, exported interface, constructor returns the interface, `ctx` first.
-- Errors: wrap with `fmt.Errorf("failed to <action>: %w", err)`. Sentinels only when a caller branches with `errors.Is` (`domain.ErrPreflightBlocked`). Findings and run statuses are results, not errors.
-- Logging: `slog` logger instances with `LogAttrs` and snake_case keys, to stderr. Stdout is reserved for the answer, the summary JSON, or the stream.
+| Package | Role |
+| --- | --- |
+| `core` | Pure model and rules: request, result, events, statistics, finding triage, and outcome classification. Standard library only, no I/O. |
+| `harness` | Infrastructure, one concern per file: `harness.go` (the `Run` flow and public API), `process.go` (subprocess and process groups), `decode.go` and `wire.go` (runner JSONL), `preflight.go`, and `state.go` (state directory and run records). |
+| `stream` | The versioned JSONL encoding of core events and summaries, for `--stream` and `summary.json`. |
+| `cmd/uagent` | The CLI: flags, terminal rendering, and exit codes. |
+| `testing` | Fixtures, the fake runner, and golden files. |
 
-## Change rules
+## Rules
 
-- A change to event or summary fields must update `stream/README.md`. Removing or renaming a field bumps `stream.SchemaVersion`; rs-uagent-tui depends on it.
-- Tests: black-box `_test` packages, harness with mockery mocks (`go generate ./...`), fixtures in `testing/fixtures`. Real runner output only, with local paths removed.
-- Before committing: `go test ./...`, `golangci-lint run ./...`, and `memoria check`. After changing code, follow `docs/documentation/memoria.md` to review the affected READMEs and commit `memoria.lock`.
+- `core` never imports `os`, `os/exec`, `encoding/json`, or `log/slog`, and its structs carry no tags. A decision that needs no I/O belongs in `core`.
+- Wire formats stay at the edge: runner JSON in `harness/wire.go`, stream JSON in `stream`.
+- Wrap errors with `fmt.Errorf("failed to <action>: %w", err)`. Add a sentinel only when a caller branches on it; `harness.ErrPreflightBlocked` is the one today. Findings and run statuses are results, not errors.
+- Log with `slog` logger instances and `LogAttrs`, snake_case keys, to stderr. Stdout belongs to the answer, the summary JSON, or the stream.
+- `main` owns the only `os.Exit`.
+- Test through real code paths: the fake runner and captured fixtures instead of mocks.
+- Changing an event or summary field updates `stream/README.md` and the golden files. Removing or renaming a field bumps `stream.SchemaVersion`.

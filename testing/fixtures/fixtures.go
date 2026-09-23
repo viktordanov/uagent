@@ -4,9 +4,11 @@ package fixtures
 
 import (
 	"embed"
+	"path/filepath"
+	"runtime"
 	"time"
 
-	"github.com/viktordanov/uagent/domain"
+	"github.com/viktordanov/uagent/core"
 )
 
 //go:embed runner/*.jsonl
@@ -41,14 +43,26 @@ func RunnerOutput(name string) []byte {
 	return data
 }
 
+// Path returns the file path of a captured runner output, for FAKERUNNER_FIXTURE.
+func Path(name string) string { return filepath.Join(dir(), "runner", name) }
+
+// GoldenPath returns the file path of a golden file.
+func GoldenPath(name string) string { return filepath.Join(dir(), "golden", name) }
+
+func dir() string {
+	_, file, _, _ := runtime.Caller(0) //nolint:dogsled // only the file name is needed
+
+	return filepath.Dir(file)
+}
+
 // Request returns a valid run request.
-func Request() domain.RunRequest {
-	return RequestWith(func(*domain.RunRequest) {})
+func Request() core.Request {
+	return RequestWith(func(*core.Request) {})
 }
 
 // RequestWith returns Request modified by fn.
-func RequestWith(fn func(*domain.RunRequest)) domain.RunRequest {
-	req := domain.RunRequest{
+func RequestWith(fn func(*core.Request)) core.Request {
+	req := core.Request{
 		RunID:     RunID,
 		SessionID: SessionID,
 		Prompt:    "Summarize this project.",
@@ -63,18 +77,18 @@ func RequestWith(fn func(*domain.RunRequest)) domain.RunRequest {
 }
 
 // ToolRun returns the events of one tool call that starts at start and runs for d.
-func ToolRun(callID string, start, d time.Duration, ok bool) []domain.Event {
-	return []domain.Event{
-		domain.ToolCalled{At: At(start), CallID: callID, Name: Tool, Label: "echo " + callID},
-		domain.ToolStarted{At: At(start), CallID: callID, OpID: "op-" + callID, Name: Tool},
-		domain.ToolFinished{At: At(start + d), CallID: callID, OpID: "op-" + callID, Name: Tool, OK: ok, Duration: d},
+func ToolRun(callID string, start, d time.Duration, ok bool) []core.Event {
+	return []core.Event{
+		core.ToolCalled{At: At(start), CallID: callID, Name: Tool, Label: "echo " + callID},
+		core.ToolStarted{At: At(start), CallID: callID, OpID: "op-" + callID, Name: Tool},
+		core.ToolFinished{At: At(start + d), CallID: callID, OpID: "op-" + callID, Name: Tool, OK: ok, Duration: d},
 	}
 }
 
 // Turn returns TurnStarted at start and ModelResponded after d.
-func Turn(n int, start, d time.Duration, usage domain.Tokens) []domain.Event {
-	return []domain.Event{
-		domain.TurnStarted{At: At(start), Turn: n},
-		domain.ModelResponded{At: At(start + d), Turn: n, Duration: d, Usage: usage},
+func Turn(n int, start, d time.Duration, usage core.Tokens) []core.Event {
+	return []core.Event{
+		core.TurnStarted{At: At(start), Turn: n},
+		core.ModelResponded{At: At(start + d), Turn: n, Duration: d, Usage: usage},
 	}
 }

@@ -10,6 +10,6 @@ Architecture rules, writing guidance, section conventions, and the Memoria revie
 3. [Section IDs](documentation/sections.md): the shared IDs that map README sections to source files.
 4. [Memoria procedure](documentation/memoria.md): how to review and acknowledge documentation after a code change.
 
-Every package README in this repository is maintained with [Memoria](https://github.com/viktordanov/rs-memoria).
+Every README in this repository is maintained with [Memoria](https://github.com/viktordanov/rs-memoria).
 The nearest README owns the files beneath it, and `memoria check` in CI fails when a README has not been reviewed against the current code.
 <!-- /memoria:section -->

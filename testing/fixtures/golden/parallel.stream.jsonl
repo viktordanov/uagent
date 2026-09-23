@@ -1,0 +1,20 @@
+{"at":"<now>","effort":"high","model":"gpt-6-sol","provider":"openai-codex","run_id":"<run_id>","session_id":"<session_id>","type":"run_started","v":1,"workspace":"<workspace>"}
+{"at":"2026-09-23T12:39:18.991929Z","turn":1,"type":"turn_started","v":1}
+{"at":"2026-09-23T12:39:21.677979Z","duration_ms":2686,"stop":"complete","turn":1,"type":"model_responded","usage":{"cache_write_input":0,"cached_input":0,"input":554,"output":23,"reasoning":0},"v":1}
+{"at":"2026-09-23T12:39:21.677979Z","call_id":"call_0or9EL2iT3rIe5Wll8L03dSu","label":"sleep 4; echo A","name":"Bash","type":"tool_called","v":1}
+{"at":"2026-09-23T12:39:21.683652Z","call_id":"call_0or9EL2iT3rIe5Wll8L03dSu","label":"sleep 4; echo A","name":"Bash","op_id":"ab277d66-9ee0-4c31-a027-1c5ee275a0d1","type":"tool_started","v":1}
+{"at":"2026-09-23T12:39:25.765084Z","call_id":"call_0or9EL2iT3rIe5Wll8L03dSu","detail":"exit 0","duration_ms":4081,"label":"sleep 4; echo A","name":"Bash","ok":true,"op_id":"ab277d66-9ee0-4c31-a027-1c5ee275a0d1","type":"tool_finished","v":1}
+{"at":"2026-09-23T12:39:25.769164Z","turn":2,"type":"turn_started","v":1}
+{"at":"2026-09-23T12:39:28.257192Z","duration_ms":2488,"stop":"complete","turn":2,"type":"model_responded","usage":{"cache_write_input":0,"cached_input":0,"input":590,"output":23,"reasoning":0},"v":1}
+{"at":"2026-09-23T12:39:28.257192Z","call_id":"call_BsQqpxRtkIPj6KUYbyVNc7yl","label":"sleep 2; echo B","name":"Bash","type":"tool_called","v":1}
+{"at":"2026-09-23T12:39:28.26479Z","call_id":"call_BsQqpxRtkIPj6KUYbyVNc7yl","label":"sleep 2; echo B","name":"Bash","op_id":"c239abb7-12eb-465b-ba23-2a3cdc23dfa2","type":"tool_started","v":1}
+{"at":"2026-09-23T12:39:30.335169Z","call_id":"call_BsQqpxRtkIPj6KUYbyVNc7yl","detail":"exit 0","duration_ms":2070,"label":"sleep 2; echo B","name":"Bash","ok":true,"op_id":"c239abb7-12eb-465b-ba23-2a3cdc23dfa2","type":"tool_finished","v":1}
+{"at":"2026-09-23T12:39:30.340265Z","turn":3,"type":"turn_started","v":1}
+{"at":"2026-09-23T12:39:32.759353Z","duration_ms":2419,"stop":"complete","turn":3,"type":"model_responded","usage":{"cache_write_input":0,"cached_input":0,"input":626,"output":18,"reasoning":0},"v":1}
+{"at":"2026-09-23T12:39:32.759353Z","call_id":"call_yMH7DF7V147GD0Fj8aD8nN3j","label":"ls","name":"Bash","type":"tool_called","v":1}
+{"at":"2026-09-23T12:39:32.769931Z","call_id":"call_yMH7DF7V147GD0Fj8aD8nN3j","label":"ls","name":"Bash","op_id":"348c6f2b-89d3-4a32-8eaa-156b520c0aef","type":"tool_started","v":1}
+{"at":"2026-09-23T12:39:32.837304Z","call_id":"call_yMH7DF7V147GD0Fj8aD8nN3j","detail":"exit 0","duration_ms":67,"label":"ls","name":"Bash","ok":true,"op_id":"348c6f2b-89d3-4a32-8eaa-156b520c0aef","type":"tool_finished","v":1}
+{"at":"2026-09-23T12:39:32.841528Z","turn":4,"type":"turn_started","v":1}
+{"at":"2026-09-23T12:39:34.924786Z","duration_ms":2083,"stop":"complete","turn":4,"type":"model_responded","usage":{"cache_write_input":0,"cached_input":0,"input":658,"output":7,"reasoning":0},"v":1}
+{"at":"2026-09-23T12:39:34.924786Z","final":true,"text":"A; B","type":"assistant_message","v":1}
+{"at":"<now>","summary":{"answer":"A; B","effort":"high","model":"gpt-6-sol","provider":"openai-codex","run_id":"<run_id>","runner_exit_code":0,"session_id":"<session_id>","started_at":"<started_at>","stats":{"event_span_ms":15932,"failed_tool_calls":0,"final_answer":true,"max_parallel_tools":1,"model_ms":9676,"model_responses":4,"tokens":{"cache_write_input":0,"cached_input":0,"input":2428,"output":71,"reasoning":0},"tool_busy_ms":6219,"tool_calls":3,"tool_model_overlap_ms":0,"tools_by_name":{"Bash":3},"turns":4},"status":"ok","v":1,"wall_ms":"<wall_ms>","workspace":"<workspace>"},"type":"run_finished","v":1}

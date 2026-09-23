@@ -1,4 +1,4 @@
-package domain
+package core
 
 import "time"
 
@@ -7,10 +7,8 @@ type Event interface {
 	OccurredAt() time.Time
 }
 
-// EventSink receives events as they happen. Emit is called from one goroutine at a time.
-type EventSink interface {
-	Emit(event Event)
-}
+// Sink receives events as they happen, from one goroutine at a time.
+type Sink func(Event)
 
 type RunStarted struct {
 	At        time.Time
@@ -89,7 +87,7 @@ type RunnerError struct {
 
 type RunFinished struct {
 	At     time.Time
-	Result RunResult
+	Result Result
 }
 
 func (e RunStarted) OccurredAt() time.Time       { return e.At }

@@ -1,5 +1,4 @@
-// Package render formats run events and summaries for people reading a terminal.
-package render
+package main
 
 import "os"
 

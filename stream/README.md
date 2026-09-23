@@ -2,7 +2,7 @@
 # Stream
 
 <!-- memoria:export id="summary" -->
-The stream package writes run events as versioned JSONL for `uagent --stream`. It is the contract for programs that drive uagent, such as rs-uagent-tui.
+The stream package writes run events as versioned JSONL for `uagent --stream`. It is the contract for programs that drive uagent from outside Go.
 <!-- /memoria:export -->
 
 1. [Read the stream](#read-the-stream)

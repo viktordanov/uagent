@@ -1,9 +1,6 @@
-// Package preflight checks the environment before a run: workspace, state
-// directory placement, workspace .env contents, and provider credentials.
-package preflight
+package harness
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -15,49 +12,29 @@ import (
 	"strings"
 	"time"
 
-	"github.com/viktordanov/uagent/domain"
-)
-
-const (
-	FindingWorkspaceMissing = "workspace_missing"
-	FindingStateInWorkspace = "state_in_workspace"
-	FindingAuthMissing      = "auth_missing"
-	FindingAuthExpired      = "auth_expired"
-	FindingAuthExpiring     = "auth_expiring"
+	"github.com/viktordanov/uagent/core"
 )
 
 const expiryWarning = time.Hour
 
-// Config configures the checks.
-type Config struct {
-	StateDir string
-	// Getenv reads the environment (default os.Getenv).
-	Getenv func(string) string
-}
-
+// checker inspects the environment before a run: workspace, state directory
+// placement, workspace .env contents, and provider credentials.
 type checker struct {
 	stateDir string
 	getenv   func(string) string
 }
 
-func New(cfg Config) domain.Preflight {
-	getenv := cfg.Getenv
-	if getenv == nil {
-		getenv = os.Getenv
-	}
-
-	return &checker{stateDir: cfg.StateDir, getenv: getenv}
-}
-
-func (c *checker) Check(_ context.Context, req domain.RunRequest) ([]domain.Finding, error) {
+// check returns findings, not errors. It errors only when a file it must read
+// exists but cannot be read, or when the home directory cannot be found.
+func (c *checker) check(req core.Request) ([]core.Finding, error) {
 	if info, err := os.Stat(req.Workspace); err != nil || !info.IsDir() {
-		return []domain.Finding{blocking(FindingWorkspaceMissing, fmt.Sprintf("workspace %s is not a directory", req.Workspace))}, nil
+		return []core.Finding{blocking(core.FindingWorkspaceMissing, fmt.Sprintf("workspace %s is not a directory", req.Workspace))}, nil
 	}
-	var findings []domain.Finding
+	var findings []core.Finding
 	// unreal-agent issue #3: sessions inside the workspace get read back by the
 	// agent's own background greps and grow without bound.
 	if isWithin(realPath(c.stateDir), realPath(req.Workspace)) {
-		findings = append(findings, blocking(FindingStateInWorkspace,
+		findings = append(findings, blocking(core.FindingStateInWorkspace,
 			fmt.Sprintf("state dir %s is inside the workspace; pick one outside it with --state-dir", c.stateDir)))
 	}
 	risky, err := riskyDotenvKeys(req.Workspace)
@@ -65,7 +42,7 @@ func (c *checker) Check(_ context.Context, req domain.RunRequest) ([]domain.Find
 		return nil, err
 	}
 	if len(risky) > 0 {
-		findings = append(findings, blocking(domain.FindingDotenvRisky, fmt.Sprintf(
+		findings = append(findings, blocking(core.FindingDotenvRisky, fmt.Sprintf(
 			"workspace .env sets %s, which can redirect the model endpoint or credentials (override with --allow-dotenv)",
 			strings.Join(risky, ", "))))
 	}
@@ -77,8 +54,8 @@ func (c *checker) Check(_ context.Context, req domain.RunRequest) ([]domain.Find
 	return append(findings, auth...), nil
 }
 
-func blocking(code, msg string) domain.Finding {
-	return domain.Finding{Code: code, Severity: domain.SeverityBlocking, Message: msg}
+func blocking(code, msg string) core.Finding {
+	return core.Finding{Code: code, Severity: core.SeverityBlocking, Message: msg}
 }
 
 // riskyDotenvKeys guards against unreal-agent issue #5: the runner loads
@@ -122,7 +99,7 @@ var apiKeyEnv = map[string]string{
 	"fireworks":  "FIREWORKS_API_KEY",
 }
 
-func (c *checker) checkAuth(provider string) ([]domain.Finding, error) {
+func (c *checker) checkAuth(provider string) ([]core.Finding, error) {
 	switch provider {
 	case "openai-codex":
 		return c.checkCodexAuth()
@@ -131,13 +108,13 @@ func (c *checker) checkAuth(provider string) ([]domain.Finding, error) {
 	}
 	env := apiKeyEnv[provider]
 	if strings.TrimSpace(c.getenv("UNREAL_HARNESS_LLM_API_KEY")) == "" && strings.TrimSpace(c.getenv(env)) == "" {
-		return []domain.Finding{blocking(FindingAuthMissing, fmt.Sprintf("provider %s needs %s or UNREAL_HARNESS_LLM_API_KEY", provider, env))}, nil
+		return []core.Finding{blocking(core.FindingAuthMissing, fmt.Sprintf("provider %s needs %s or UNREAL_HARNESS_LLM_API_KEY", provider, env))}, nil
 	}
 
 	return nil, nil
 }
 
-func (c *checker) checkCodexAuth() ([]domain.Finding, error) {
+func (c *checker) checkCodexAuth() ([]core.Finding, error) {
 	if strings.TrimSpace(c.getenv("OPENAI_CODEX_ACCESS_TOKEN")) != "" {
 		return nil, nil
 	}
@@ -147,7 +124,7 @@ func (c *checker) checkCodexAuth() ([]domain.Finding, error) {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return []domain.Finding{blocking(FindingAuthMissing, fmt.Sprintf("codex auth not found at %s: run `codex login`", path))}, nil
+		return []core.Finding{blocking(core.FindingAuthMissing, fmt.Sprintf("codex auth not found at %s: run `codex login`", path))}, nil
 	}
 	var auth struct {
 		Tokens struct {
@@ -155,7 +132,7 @@ func (c *checker) checkCodexAuth() ([]domain.Finding, error) {
 		} `json:"tokens"`
 	}
 	if json.Unmarshal(data, &auth) != nil || auth.Tokens.AccessToken == "" {
-		return []domain.Finding{blocking(FindingAuthMissing, path+" has no access token: run `codex login`")}, nil
+		return []core.Finding{blocking(core.FindingAuthMissing, path+" has no access token: run `codex login`")}, nil
 	}
 	// The runner never refreshes tokens, so check expiry up front.
 	exp, ok := jwtExpiry(auth.Tokens.AccessToken)
@@ -164,11 +141,11 @@ func (c *checker) checkCodexAuth() ([]domain.Finding, error) {
 	}
 	switch left := time.Until(exp); {
 	case left <= 0:
-		return []domain.Finding{blocking(FindingAuthExpired,
+		return []core.Finding{blocking(core.FindingAuthExpired,
 			fmt.Sprintf("codex access token expired %s ago: run `codex login`", (-left).Round(time.Minute)))}, nil
 	case left < expiryWarning:
-		return []domain.Finding{{
-			Code: FindingAuthExpiring, Severity: domain.SeverityWarning,
+		return []core.Finding{{
+			Code: core.FindingAuthExpiring, Severity: core.SeverityWarning,
 			Message: fmt.Sprintf("codex access token expires in %s; run `codex login` soon", left.Round(time.Minute)),
 		}}, nil
 	}

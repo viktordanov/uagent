@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/viktordanov/uagent/domain"
+	"github.com/viktordanov/uagent/core"
 	"github.com/viktordanov/uagent/stream"
 	"github.com/viktordanov/uagent/testing/fixtures"
 )
@@ -20,8 +20,8 @@ func TestSink_Emit(t *testing.T) {
 		var buf bytes.Buffer
 		sink := stream.NewSink(&buf)
 
-		sink.Emit(domain.TurnStarted{At: fixtures.T0, Turn: 1})
-		sink.Emit(domain.ToolFinished{At: fixtures.At(time.Second), CallID: "c1", OpID: "o1", Name: "Bash", Label: "ls", OK: true, Detail: "exit 0", Duration: 1500 * time.Millisecond})
+		sink.Emit(core.TurnStarted{At: fixtures.T0, Turn: 1})
+		sink.Emit(core.ToolFinished{At: fixtures.At(time.Second), CallID: "c1", OpID: "o1", Name: "Bash", Label: "ls", OK: true, Detail: "exit 0", Duration: 1500 * time.Millisecond})
 
 		require.NoError(t, sink.Err())
 		lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
@@ -32,12 +32,12 @@ func TestSink_Emit(t *testing.T) {
 
 	t.Run("run_finished carries the summary", func(t *testing.T) {
 		var buf bytes.Buffer
-		result := domain.RunResult{
-			Request: fixtures.Request(), Status: domain.StatusOK, StartedAt: fixtures.T0, Wall: 2 * time.Second,
-			Stats: domain.Stats{Turns: 1, ToolsByName: map[string]int{"Bash": 1}, Tokens: domain.Tokens{InputTokens: 10}}, Answer: "hi",
+		result := core.Result{
+			Request: fixtures.Request(), Status: core.StatusOK, StartedAt: fixtures.T0, Wall: 2 * time.Second,
+			Stats: core.Stats{Turns: 1, ToolsByName: map[string]int{"Bash": 1}, Tokens: core.Tokens{InputTokens: 10}}, Answer: "hi",
 		}
 
-		stream.NewSink(&buf).Emit(domain.RunFinished{At: fixtures.At(2 * time.Second), Result: result})
+		stream.NewSink(&buf).Emit(core.RunFinished{At: fixtures.At(2 * time.Second), Result: result})
 
 		var got struct {
 			Type    string            `json:"type"`

@@ -1,28 +1,17 @@
 # Writing uagent documentation
 
-Describe uagent and its packages directly, in a neutral third-person voice: "uagent runs…" and "The runner package drives…".
+Describe uagent directly, in a neutral third-person voice: "uagent runs…" and "The harness stops…".
 Address the reader directly only in instructions.
 
 ## Start with the reader
 
-A package README explains what the package provides, how the rest of uagent uses it, and the contract a change must keep.
-Start with a plain definition that works for a reader who has not opened the code.
-Add a vertical, numbered list of contents near the top when the README has more than two sections.
-Keep the detailed contract in the same README. Do not split a package into a short README and a separate reference page.
+uagent is a wrapper around unreal-agent-runner that adds guards and ergonomics while staying true to the runner. Keep that framing visible.
+The root README is written for someone who wants to run tasks: why the wrapper exists, how to install and run it, what it adds, and how to use it from Go.
+Keep architecture to the short notes in `docs/documentation/architecture.md`; the root README does not catalog packages.
+Other READMEs exist only where a reader needs a contract of its own: `stream` for programs that read the event stream, and `testing` for the fixtures and fake runner.
+Add a vertical, numbered list of contents near the top when a README has more than two sections.
 Use a table only when the reader is choosing between alternatives or looking up a value, such as an exit code or an event type.
-
-## Where things belong
-
-The root README introduces uagent: what it wraps, how to install and run it, its guards, and a catalog of packages.
-Package READMEs hold package detail. The root catalog imports each package's `summary` export instead of restating it.
-The `stream` README is the contract for programs that drive uagent. Keep every event type and field there.
-Facts about unreal-agent-runner behavior live in the `runner` README, with the runner version they were checked against.
-
-## Architecture vocabulary
-
-`domain` is pure: entities, events, the run service, and ports. It imports only the standard library and `uuid`.
-Adapters (`runner`, `preflight`, `runstore`, `stream`, `render`, `statedir`) implement ports or transform domain types for a boundary.
-`cmd/uagent` is the composition root. Name these layers consistently across READMEs.
+Facts about unreal-agent-runner behavior carry the runner version they were checked against.
 
 ## Diagrams
 

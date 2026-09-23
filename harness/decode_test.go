@@ -1,4 +1,4 @@
-package runner_test
+package harness_test
 
 import (
 	"bytes"
@@ -7,16 +7,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/viktordanov/uagent/domain"
-	"github.com/viktordanov/uagent/runner"
+	"github.com/viktordanov/uagent/core"
+	"github.com/viktordanov/uagent/harness"
 	"github.com/viktordanov/uagent/testing/fixtures"
 )
 
-func readFixture(t *testing.T, name string) ([]domain.Event, *domain.StatsCollector) {
+func readFixture(t *testing.T, name string) ([]core.Event, *core.StatsCollector) {
 	t.Helper()
-	var events []domain.Event
-	c := domain.NewStatsCollector()
-	err := runner.ReadEvents(bytes.NewReader(fixtures.RunnerOutput(name)), func(e domain.Event) {
+	var events []core.Event
+	c := core.NewStatsCollector()
+	err := harness.ReadEvents(bytes.NewReader(fixtures.RunnerOutput(name)), func(e core.Event) {
 		events = append(events, e)
 		c.Add(e)
 	})
@@ -38,7 +38,7 @@ func TestReadEvents(t *testing.T) {
 		assert.Equal(t, int64(526+601), s.Tokens.InputTokens)
 		assert.Equal(t, int64(50+5), s.Tokens.OutputTokens)
 		assert.Equal(t, "hello", c.Answer())
-		assert.Contains(t, events, domain.Event(domain.ToolCalled{
+		assert.Contains(t, events, core.Event(core.ToolCalled{
 			At: events[1].OccurredAt(), CallID: "call_WeU5T6p7qIYxhEwBoDVehfYG", Name: "Bash", Label: "ls",
 		}))
 	})
@@ -46,9 +46,9 @@ func TestReadEvents(t *testing.T) {
 	t.Run("each tool finishes exactly once with its exit code", func(t *testing.T) {
 		events, _ := readFixture(t, "parallel.jsonl")
 
-		var finished []domain.ToolFinished
+		var finished []core.ToolFinished
 		for _, e := range events {
-			if f, ok := e.(domain.ToolFinished); ok {
+			if f, ok := e.(core.ToolFinished); ok {
 				finished = append(finished, f)
 			}
 		}
@@ -68,9 +68,9 @@ func TestReadEvents(t *testing.T) {
 		var started, finished int
 		for _, e := range events {
 			switch e.(type) {
-			case domain.ToolStarted:
+			case core.ToolStarted:
 				started++
-			case domain.ToolFinished:
+			case core.ToolFinished:
 				finished++
 			}
 		}
@@ -81,15 +81,15 @@ func TestReadEvents(t *testing.T) {
 	})
 
 	t.Run("error and unparseable lines become runner errors", func(t *testing.T) {
-		d := runner.NewDecoder()
+		d := harness.NewDecoder()
 
 		errEvents := d.Decode([]byte(`{"type":"error","message":"model must be set"}`))
 		junk := d.Decode([]byte("panic: oops"))
 
 		require.Len(t, errEvents, 1)
-		assert.Equal(t, "model must be set", errEvents[0].(domain.RunnerError).Message)
+		assert.Equal(t, "model must be set", errEvents[0].(core.RunnerError).Message)
 		require.Len(t, junk, 1)
-		assert.Contains(t, junk[0].(domain.RunnerError).Message, "unparseable runner output: panic: oops")
+		assert.Contains(t, junk[0].(core.RunnerError).Message, "unparseable runner output: panic: oops")
 		assert.Empty(t, d.Decode([]byte("  \n")))
 	})
 }

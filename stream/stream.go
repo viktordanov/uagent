@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/viktordanov/uagent/domain"
+	"github.com/viktordanov/uagent/core"
 )
 
-// Sink is a domain.EventSink that writes each event as one JSON line.
+// Sink writes each event as one JSON line.
 type Sink struct {
 	enc *json.Encoder
 	err error
@@ -23,7 +23,7 @@ func NewSink(w io.Writer) *Sink {
 	return &Sink{enc: enc}
 }
 
-func (s *Sink) Emit(event domain.Event) {
+func (s *Sink) Emit(event core.Event) {
 	dto, ok := EventToDTO(event)
 	if !ok || s.err != nil {
 		return

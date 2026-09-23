@@ -33,10 +33,10 @@ memoria ack <README> \
   --note "<what you verified against this revision>"
 ```
 
-Repeat until the plan is empty, then run `memoria check`. Review providers before consumers: the root README imports package summaries, so it comes last.
+Repeat until the plan is empty, then run `memoria check`. Review providers before consumers: the root README imports the `stream` and `testing` summaries, so it comes last.
 Never edit an import body by hand, never edit `memoria.lock`, and never acknowledge when the plan is empty.
 
-## Adding a package
+## Adding a README
 
-Write the package README with a `summary` export, add a catalog entry with an import to the root README, and run `memoria render README.md`.
+Add a README only for a reader who needs a contract of its own. Give it a `summary` export, import that summary where the root README mentions the topic, and run `memoria render README.md`.
 Then follow the review loop.

@@ -13,8 +13,8 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/viktordanov/uagent/domain"
-	"github.com/viktordanov/uagent/render"
+	"github.com/viktordanov/uagent/core"
+	"github.com/viktordanov/uagent/harness"
 )
 
 const (
@@ -46,27 +46,27 @@ func exitCode(err error) int {
 	switch {
 	case errors.As(err, &exitErr):
 		code = exitErr.ExitCode()
-	case errors.Is(err, domain.ErrPreflightBlocked):
+	case errors.Is(err, harness.ErrPreflightBlocked):
 		code = exitUsage
 	}
 	if msg := err.Error(); msg != "" {
-		fmt.Fprintf(os.Stderr, "%s %s\n", render.PaletteFor(os.Stderr).Red("uagent:"), msg)
+		fmt.Fprintf(os.Stderr, "%s %s\n", PaletteFor(os.Stderr).Red("uagent:"), msg)
 	}
 
 	return code
 }
 
-func statusExitCode(status domain.Status) int {
+func statusExitCode(status core.Status) int {
 	switch status {
-	case domain.StatusOK:
+	case core.StatusOK:
 		return exitOK
-	case domain.StatusTimeout:
+	case core.StatusTimeout:
 		return exitTimeout
-	case domain.StatusInterrupted:
+	case core.StatusInterrupted:
 		return exitInterrupt
-	case domain.StatusDiskLimit:
+	case core.StatusDiskLimit:
 		return exitDiskLimit
-	case domain.StatusFailed:
+	case core.StatusFailed:
 	}
 
 	return exitFailed

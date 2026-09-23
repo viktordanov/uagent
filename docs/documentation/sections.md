@@ -1,23 +1,21 @@
 # Memoria section IDs
 
 Section IDs identify a concern within a README. Keep the ID stable when a heading changes.
-Use the same ID for the same concern across packages.
+Use the same ID for the same concern across READMEs.
 
 | ID | Concern |
 | --- | --- |
-| `overview` | What the package provides and where it fits |
-| `setup` | Construction, configuration, and dependencies |
+| `overview` | What the README covers and why it exists |
 | `usage` | Operations, inputs, and results |
 | `contract` | Guarantees, limits, and caller responsibilities |
 | `lifecycle` | Processes, cleanup, and shutdown |
-| `testing` | How the package is tested and which fixtures it uses |
 
 Use only the sections that help. Add a specific ID, such as `events`, when one topic needs its own review target.
 
 Write the explanation first, then map it to the files that support it:
 
 ```markdown
-<!-- memoria:section id="usage" files="runner.go decode.go" -->
+<!-- memoria:section id="usage" files="harness/process.go harness/decode.go" -->
 ## Run a request
 
 Explain the operation and its result.

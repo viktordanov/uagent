@@ -1,4 +1,4 @@
-package domain
+package core
 
 import (
 	"slices"
@@ -80,9 +80,6 @@ func NewStatsCollector() *StatsCollector {
 		ops:         map[string]*toolSpan{},
 	}
 }
-
-// Emit makes the collector usable as an EventSink.
-func (c *StatsCollector) Emit(event Event) { c.Add(event) }
 
 func (c *StatsCollector) Add(event Event) {
 	switch e := event.(type) {

@@ -1,4 +1,4 @@
-package domain_test
+package core_test
 
 import (
 	"testing"
@@ -6,12 +6,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
-	"github.com/viktordanov/uagent/domain"
+	"github.com/viktordanov/uagent/core"
 	"github.com/viktordanov/uagent/testing/fixtures"
 )
 
-func collect(events ...[]domain.Event) *domain.StatsCollector {
-	c := domain.NewStatsCollector()
+func collect(events ...[]core.Event) *core.StatsCollector {
+	c := core.NewStatsCollector()
 	for _, group := range events {
 		for _, e := range group {
 			c.Add(e)
@@ -22,7 +22,7 @@ func collect(events ...[]domain.Event) *domain.StatsCollector {
 }
 
 func TestStatsCollector(t *testing.T) {
-	usage := domain.Tokens{InputTokens: 100, CachedInputTokens: 40, OutputTokens: 10, ReasoningTokens: 3}
+	usage := core.Tokens{InputTokens: 100, CachedInputTokens: 40, OutputTokens: 10, ReasoningTokens: 3}
 
 	t.Run("counts turns, tokens, and tools", func(t *testing.T) {
 		c := collect(
@@ -36,7 +36,7 @@ func TestStatsCollector(t *testing.T) {
 
 		assert.Equal(t, 2, s.Turns)
 		assert.Equal(t, 2, s.ModelResponses)
-		assert.Equal(t, domain.Tokens{InputTokens: 200, CachedInputTokens: 80, OutputTokens: 20, ReasoningTokens: 6}, s.Tokens)
+		assert.Equal(t, core.Tokens{InputTokens: 200, CachedInputTokens: 80, OutputTokens: 20, ReasoningTokens: 6}, s.Tokens)
 		assert.Equal(t, 2, s.ToolCalls)
 		assert.Equal(t, 1, s.FailedToolCalls)
 		assert.Equal(t, map[string]int{"Bash": 2}, s.ToolsByName)
@@ -69,9 +69,9 @@ func TestStatsCollector(t *testing.T) {
 	})
 
 	t.Run("in-flight work counts up to Close", func(t *testing.T) {
-		c := collect([]domain.Event{
-			domain.TurnStarted{At: fixtures.At(0), Turn: 1},
-			domain.ToolStarted{At: fixtures.At(0), CallID: "a", OpID: "op-a", Name: "Bash"},
+		c := collect([]core.Event{
+			core.TurnStarted{At: fixtures.At(0), Turn: 1},
+			core.ToolStarted{At: fixtures.At(0), CallID: "a", OpID: "op-a", Name: "Bash"},
 		})
 		c.Close(fixtures.At(8 * time.Second))
 
@@ -83,10 +83,10 @@ func TestStatsCollector(t *testing.T) {
 	})
 
 	t.Run("answer prefers the final message", func(t *testing.T) {
-		c := collect([]domain.Event{
-			domain.AssistantMessage{At: fixtures.At(0), Text: "thinking out loud"},
-			domain.AssistantMessage{At: fixtures.At(time.Second), Text: "final", Final: true},
-			domain.AssistantMessage{At: fixtures.At(2 * time.Second), Text: "trailing"},
+		c := collect([]core.Event{
+			core.AssistantMessage{At: fixtures.At(0), Text: "thinking out loud"},
+			core.AssistantMessage{At: fixtures.At(time.Second), Text: "final", Final: true},
+			core.AssistantMessage{At: fixtures.At(2 * time.Second), Text: "trailing"},
 		})
 
 		assert.Equal(t, "final", c.Answer())
@@ -94,16 +94,16 @@ func TestStatsCollector(t *testing.T) {
 	})
 
 	t.Run("answer falls back to the last assistant text", func(t *testing.T) {
-		c := collect([]domain.Event{domain.AssistantMessage{At: fixtures.At(0), Text: "partial"}})
+		c := collect([]core.Event{core.AssistantMessage{At: fixtures.At(0), Text: "partial"}})
 
 		assert.Equal(t, "partial", c.Answer())
 		assert.False(t, c.Stats().FinalAnswer)
 	})
 
 	t.Run("records errors, failures, and stop reasons", func(t *testing.T) {
-		c := collect([]domain.Event{
-			domain.ModelResponded{At: fixtures.At(0), Stop: "max_output_tokens", Failure: "server_error: overloaded"},
-			domain.RunnerError{At: fixtures.At(0), Message: "model must be set"},
+		c := collect([]core.Event{
+			core.ModelResponded{At: fixtures.At(0), Stop: "max_output_tokens", Failure: "server_error: overloaded"},
+			core.RunnerError{At: fixtures.At(0), Message: "model must be set"},
 		})
 
 		s := c.Stats()

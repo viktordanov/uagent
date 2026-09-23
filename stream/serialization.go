@@ -3,7 +3,7 @@ package stream
 import (
 	"time"
 
-	"github.com/viktordanov/uagent/domain"
+	"github.com/viktordanov/uagent/core"
 )
 
 // SchemaVersion is bumped on any breaking change to the event or summary shape.
@@ -152,45 +152,45 @@ type SummaryDTO struct {
 }
 
 // EventToDTO maps a domain event to its wire form. ok is false for unknown events.
-func EventToDTO(event domain.Event) (dto any, ok bool) {
+func EventToDTO(event core.Event) (dto any, ok bool) {
 	switch e := event.(type) {
-	case domain.RunStarted:
+	case core.RunStarted:
 		return RunStartedDTO{
 			header: newHeader("run_started", e.At), RunID: e.RunID, SessionID: e.SessionID,
 			Provider: e.Provider, Model: e.Model, Effort: e.Effort, Workspace: e.Workspace,
 		}, true
-	case domain.PreflightWarning:
+	case core.PreflightWarning:
 		return PreflightWarningDTO{header: newHeader("preflight_warning", e.At), Code: e.Code, Message: e.Message}, true
-	case domain.TurnStarted:
+	case core.TurnStarted:
 		return TurnStartedDTO{header: newHeader("turn_started", e.At), Turn: e.Turn}, true
-	case domain.ModelResponded:
+	case core.ModelResponded:
 		return ModelRespondedDTO{
 			header: newHeader("model_responded", e.At), Turn: e.Turn, DurationMS: e.Duration.Milliseconds(),
 			Usage: tokensToDTO(e.Usage), Stop: e.Stop, Failure: e.Failure,
 		}, true
-	case domain.ToolCalled:
+	case core.ToolCalled:
 		return ToolCalledDTO{header: newHeader("tool_called", e.At), CallID: e.CallID, Name: e.Name, Label: e.Label}, true
-	case domain.ToolStarted:
+	case core.ToolStarted:
 		return ToolStartedDTO{header: newHeader("tool_started", e.At), CallID: e.CallID, OpID: e.OpID, Name: e.Name, Label: e.Label}, true
-	case domain.ToolFinished:
+	case core.ToolFinished:
 		return ToolFinishedDTO{
 			header: newHeader("tool_finished", e.At), CallID: e.CallID, OpID: e.OpID, Name: e.Name, Label: e.Label,
 			OK: e.OK, Detail: e.Detail, DurationMS: e.Duration.Milliseconds(),
 		}, true
-	case domain.AssistantMessage:
+	case core.AssistantMessage:
 		return AssistantMessageDTO{header: newHeader("assistant_message", e.At), Text: e.Text, Final: e.Final}, true
-	case domain.ReasoningSummary:
+	case core.ReasoningSummary:
 		return ReasoningDTO{header: newHeader("reasoning", e.At), Text: e.Text}, true
-	case domain.RunnerError:
+	case core.RunnerError:
 		return RunnerErrorDTO{header: newHeader("runner_error", e.At), Message: e.Message}, true
-	case domain.RunFinished:
+	case core.RunFinished:
 		return RunFinishedDTO{header: newHeader("run_finished", e.At), Summary: SummaryToDTO(e.Result)}, true
 	}
 
 	return nil, false
 }
 
-func SummaryToDTO(r domain.RunResult) SummaryDTO {
+func SummaryToDTO(r core.Result) SummaryDTO {
 	s := r.Stats
 
 	return SummaryDTO{
@@ -229,13 +229,13 @@ func SummaryToDTO(r domain.RunResult) SummaryDTO {
 
 // SummaryFromDTO restores run metadata from a saved summary. Stats are not
 // restored: callers recompute them from events.jsonl.
-func SummaryFromDTO(d SummaryDTO) domain.RunResult {
-	return domain.RunResult{
-		Request: domain.RunRequest{
+func SummaryFromDTO(d SummaryDTO) core.Result {
+	return core.Result{
+		Request: core.Request{
 			RunID: d.RunID, SessionID: d.SessionID, Provider: d.Provider,
 			Model: d.Model, Effort: d.Effort, Workspace: d.Workspace,
 		},
-		Status:         domain.Status(d.Status),
+		Status:         core.Status(d.Status),
 		RunnerExitCode: d.RunnerExitCode,
 		StartedAt:      d.StartedAt,
 		Wall:           time.Duration(d.WallMS) * time.Millisecond,
@@ -243,7 +243,7 @@ func SummaryFromDTO(d SummaryDTO) domain.RunResult {
 	}
 }
 
-func tokensToDTO(t domain.Tokens) TokensDTO {
+func tokensToDTO(t core.Tokens) TokensDTO {
 	return TokensDTO{
 		Input:           t.InputTokens,
 		CachedInput:     t.CachedInputTokens,
