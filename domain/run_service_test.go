@@ -199,5 +199,6 @@ func TestRunService_Run(t *testing.T) {
 
 		require.ErrorContains(t, err, "disk full")
 		assert.Equal(t, "done", result.Answer)
+		assert.IsType(t, domain.RunFinished{}, h.sink.events[len(h.sink.events)-1], "run_finished is still emitted")
 	})
 }

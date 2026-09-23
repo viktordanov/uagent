@@ -95,10 +95,11 @@ func (s *runService) Run(ctx context.Context, req RunRequest, sink EventSink) (R
 		Stats:          collector.Stats(),
 		Answer:         collector.Answer(),
 	}
-	if err := s.store.Save(ctx, result); err != nil {
-		return result, fmt.Errorf("failed to save run: %w", err)
-	}
+	saveErr := s.store.Save(ctx, result)
 	sink.Emit(RunFinished{At: exit.EndedAt, Result: result})
+	if saveErr != nil {
+		return result, fmt.Errorf("failed to save run: %w", saveErr)
+	}
 
 	return result, nil
 }
