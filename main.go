@@ -4,10 +4,10 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +15,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/urfave/cli/v3"
 )
 
 const (
@@ -28,139 +30,222 @@ const (
 
 const defaultCodexModel = "gpt-6-sol"
 
-var efforts = []string{"low", "medium", "high", "xhigh", "max"}
-
-const usageHeader = `uagent - run one unreal-agent-runner task with guards and stats
-
-Usage:
-  uagent [flags] "<prompt>"        prompt from stdin when omitted or "-"
-  uagent stats [-json] <run-dir|events.jsonl>
-
-Stdout gets the final answer (or the summary JSON with -json); progress and
-the summary go to stderr. Each run is saved under <state-dir>/runs/.
-
-Exit codes: 0 ok, 1 failed, 2 usage/preflight, 3 disk limit, 124 timeout, 130 interrupted.
-
-Flags:
-`
-
-type stringList []string
-
-func (l *stringList) String() string     { return strings.Join(*l, ",") }
-func (l *stringList) Set(v string) error { *l = append(*l, v); return nil }
-
-type options struct {
-	model, provider, effort string
-	timeout                 time.Duration
-	workspace, stateDir     string
-	session, systemPrompt   string
-	baseURL, runner         string
-	maxDisk                 string
-	maxAttempts             int
-	disallow                stringList
-	jsonOut, quiet, verbose bool
-	allowDotenv             bool
-}
+var (
+	efforts   = []string{"low", "medium", "high", "xhigh", "max"}
+	providers = []string{"openai", "openai-codex", "openrouter", "fireworks", "ollama"}
+)
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "stats" {
-		os.Exit(statsMain(os.Args[2:]))
+	err := newApp().Run(context.Background(), os.Args)
+	if err == nil {
+		return
 	}
-	os.Exit(runMain(os.Args[1:]))
+	code := exitUsage
+	var exitErr cli.ExitCoder
+	if errors.As(err, &exitErr) {
+		code = exitErr.ExitCode()
+	}
+	if msg := err.Error(); msg != "" {
+		pal := newPalette(os.Stderr)
+		fmt.Fprintf(os.Stderr, "%s %s\n", pal.red("uagent:"), msg)
+	}
+	os.Exit(code)
 }
 
-func runMain(args []string) int {
-	var o options
-	fs := flag.NewFlagSet("uagent", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprint(fs.Output(), usageHeader); fs.PrintDefaults() }
-	fs.StringVar(&o.provider, "provider", envOr("UNREAL_HARNESS_LLM_PROVIDER", "openai-codex"), "LLM provider: openai, openai-codex, openrouter, fireworks, ollama")
-	fs.StringVar(&o.model, "model", os.Getenv("UNREAL_HARNESS_LLM_MODEL"), "model ID (openai-codex default: "+defaultCodexModel+")")
-	fs.StringVar(&o.effort, "effort", "high", "thinking level: "+strings.Join(efforts, ", "))
-	fs.DurationVar(&o.timeout, "timeout", 30*time.Minute, "overall wall-clock limit; kills the runner and its tools (0 disables)")
-	fs.StringVar(&o.workspace, "workspace", ".", "agent workspace and Bash working directory")
-	fs.StringVar(&o.workspace, "C", ".", "shorthand for -workspace")
-	fs.StringVar(&o.stateDir, "state-dir", defaultStateDir(), "sessions, logs, and run records; must be outside the workspace")
-	fs.StringVar(&o.session, "session", "", "session ID to create or resume (default: new UUID)")
-	fs.StringVar(&o.systemPrompt, "system-prompt", "", "replace the default system prompt")
-	fs.StringVar(&o.baseURL, "base-url", "", "LLM base URL override (default: provider default)")
-	fs.StringVar(&o.runner, "runner", "", "path to unreal-agent-runner (default: $UAGENT_RUNNER, ~/.local/bin, PATH)")
-	fs.StringVar(&o.maxDisk, "max-disk", "5G", "kill the run when tool output exceeds this size (0 disables)")
-	fs.IntVar(&o.maxAttempts, "max-attempts", 0, "LLM retry attempts (default: runner default)")
-	fs.Var(&o.disallow, "disallow", "tool name to disable, e.g. ViewImage (repeatable)")
-	fs.BoolVar(&o.jsonOut, "json", false, "print the summary JSON (with answer) to stdout instead of the answer")
-	fs.BoolVar(&o.quiet, "q", false, "no progress output, summary only")
-	fs.BoolVar(&o.verbose, "v", false, "also show reasoning summaries")
-	fs.BoolVar(&o.allowDotenv, "allow-dotenv", false, "run even if the workspace .env sets UNREAL_HARNESS_*, proxy, or Codex auth variables")
+func newApp() *cli.Command {
+	return &cli.Command{
+		Name:      "uagent",
+		Usage:     "run one unreal-agent-runner task with guards and stats",
+		ArgsUsage: "<prompt>",
+		Description: "Stdout gets the final answer (or the summary JSON with --json); progress and the\n" +
+			"summary go to stderr. The prompt is read from stdin when omitted or \"-\".\n" +
+			"Each run is saved under <state-dir>/runs/.\n\n" +
+			"Exit codes: 0 ok, 1 failed, 2 usage/preflight, 3 disk limit, 124 timeout, 130 interrupted.",
+		// Errors are printed once, by main, with the right exit code.
+		ExitErrHandler: func(context.Context, *cli.Command, error) {},
+		OnUsageError:   onUsageError,
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:      "provider",
+				Usage:     "LLM provider: " + strings.Join(providers, ", "),
+				Value:     "openai-codex",
+				Sources:   cli.EnvVars("UNREAL_HARNESS_LLM_PROVIDER"),
+				Validator: oneOf("provider", providers),
+			},
+			&cli.StringFlag{
+				Name:        "model",
+				Aliases:     []string{"m"},
+				Usage:       "model ID",
+				DefaultText: defaultCodexModel + " for openai-codex, else provider default",
+				Sources:     cli.EnvVars("UNREAL_HARNESS_LLM_MODEL"),
+			},
+			&cli.StringFlag{
+				Name:      "effort",
+				Aliases:   []string{"e"},
+				Usage:     "thinking level: " + strings.Join(efforts, ", "),
+				Value:     "high",
+				Validator: oneOf("effort", efforts),
+			},
+			&cli.DurationFlag{
+				Name:    "timeout",
+				Aliases: []string{"t"},
+				Usage:   "overall wall-clock limit; kills the runner and its tools (0 disables)",
+				Value:   30 * time.Minute,
+			},
+			&cli.StringFlag{
+				Name:      "workspace",
+				Aliases:   []string{"C"},
+				Usage:     "agent workspace and Bash working directory",
+				Value:     ".",
+				TakesFile: true,
+			},
+			&cli.StringFlag{
+				Name:      "state-dir",
+				Usage:     "sessions, logs, and run records; must be outside the workspace",
+				Value:     defaultStateDir(),
+				Sources:   cli.EnvVars("UAGENT_STATE_DIR"),
+				TakesFile: true,
+			},
+			&cli.StringFlag{
+				Name:        "session",
+				Usage:       "session ID to create or resume",
+				DefaultText: "new UUID",
+			},
+			&cli.StringFlag{Name: "system-prompt", Usage: "replace the default system prompt"},
+			&cli.StringFlag{
+				Name:        "base-url",
+				Usage:       "LLM base URL override",
+				DefaultText: "provider default",
+				Sources:     cli.EnvVars("UNREAL_HARNESS_LLM_BASE_URL"),
+			},
+			&cli.StringFlag{
+				Name:        "runner",
+				Usage:       "path to unreal-agent-runner",
+				DefaultText: "~/.local/bin, then PATH",
+				Sources:     cli.EnvVars("UAGENT_RUNNER"),
+				TakesFile:   true,
+			},
+			&cli.StringFlag{
+				Name:  "max-disk",
+				Usage: "kill the run when tool output exceeds this size, e.g. 500M (0 disables)",
+				Value: "5G",
+				Validator: func(v string) error {
+					_, err := parseSize(v)
+					return err
+				},
+			},
+			&cli.IntFlag{Name: "max-attempts", Usage: "LLM retry attempts (0 uses the runner default)"},
+			&cli.StringSliceFlag{Name: "disallow", Usage: "tool name to disable, e.g. ViewImage (repeatable)"},
+			&cli.BoolFlag{Name: "json", Usage: "print the summary JSON (with answer) to stdout instead of the answer"},
+			&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Usage: "no progress output, summary only"},
+			&cli.BoolFlag{Name: "verbose", Aliases: []string{"v"}, Usage: "also show reasoning summaries"},
+			&cli.BoolFlag{
+				Name:  "allow-dotenv",
+				Usage: "run even if the workspace .env sets UNREAL_HARNESS_*, proxy, or Codex auth variables",
+			},
+		},
+		Action: runAction,
+		Commands: []*cli.Command{
+			{
+				Name:         "stats",
+				Usage:        "recompute the summary for a saved run",
+				ArgsUsage:    "<run-dir|events.jsonl>",
+				Flags:        []cli.Flag{&cli.BoolFlag{Name: "json", Usage: "print summary JSON"}},
+				OnUsageError: onUsageError,
+				Action:       statsAction,
+			},
+		},
+	}
+}
 
-	positional, err := parseInterspersed(fs, args)
-	if err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return exitOK
+func oneOf(flag string, allowed []string) func(string) error {
+	return func(v string) error {
+		if !slices.Contains(allowed, v) {
+			return fmt.Errorf("invalid --%s %q (want %s)", flag, v, strings.Join(allowed, ", "))
 		}
-		return exitUsage
+		return nil
 	}
-	pal := newPalette(os.Stderr)
-	fail := func(format string, a ...any) int {
-		fmt.Fprintf(os.Stderr, "%s %s\n", pal.red("uagent:"), fmt.Sprintf(format, a...))
-		return exitUsage
-	}
+}
 
-	prompt, err := readPrompt(positional)
-	if err != nil {
-		return fail("%v", err)
+// onUsageError reports bad flags in one line instead of dumping the full help.
+func onUsageError(_ context.Context, _ *cli.Command, err error, _ bool) error {
+	return usageError("%v (see --help)", err)
+}
+
+func usageError(format string, a ...any) error {
+	return cli.Exit(fmt.Sprintf(format, a...), exitUsage)
+}
+
+type options struct {
+	provider, model, effort string
+	baseURL                 string
+	timeout                 time.Duration
+	maxDisk                 int64
+	quiet, verbose, jsonOut bool
+}
+
+func runAction(_ context.Context, cmd *cli.Command) error {
+	o := options{
+		provider: cmd.String("provider"),
+		model:    cmd.String("model"),
+		effort:   cmd.String("effort"),
+		baseURL:  cmd.String("base-url"),
+		timeout:  cmd.Duration("timeout"),
+		quiet:    cmd.Bool("quiet"),
+		verbose:  cmd.Bool("verbose"),
+		jsonOut:  cmd.Bool("json"),
 	}
-	if !slices.Contains(efforts, o.effort) {
-		return fail("invalid -effort %q (want %s)", o.effort, strings.Join(efforts, ", "))
-	}
+	o.maxDisk, _ = parseSize(cmd.String("max-disk")) // validated by the flag
 	if o.model == "" && o.provider == "openai-codex" {
 		o.model = defaultCodexModel
 	}
-	maxDisk, err := parseSize(o.maxDisk)
-	if err != nil {
-		return fail("-max-disk: %v", err)
-	}
+	pal := newPalette(os.Stderr)
 
-	workspace, err := filepath.Abs(o.workspace)
+	prompt, err := readPrompt(cmd.Args().Slice())
 	if err != nil {
-		return fail("%v", err)
+		return usageError("%v", err)
+	}
+	workspace, err := filepath.Abs(cmd.String("workspace"))
+	if err != nil {
+		return usageError("%v", err)
 	}
 	if info, err := os.Stat(workspace); err != nil || !info.IsDir() {
-		return fail("workspace %s is not a directory", workspace)
+		return usageError("workspace %s is not a directory", workspace)
 	}
-	stateDir, err := filepath.Abs(o.stateDir)
+	stateDir, err := filepath.Abs(cmd.String("state-dir"))
 	if err != nil {
-		return fail("%v", err)
+		return usageError("%v", err)
 	}
 	// Issue #3: sessions inside the workspace can be read back by the agent's
 	// own background greps and grow without bound.
 	if isWithin(realPath(stateDir), realPath(workspace)) {
-		return fail("state dir %s is inside the workspace; pick one outside it with -state-dir", stateDir)
+		return usageError("state dir %s is inside the workspace; pick one outside it with --state-dir", stateDir)
 	}
 
-	runner, err := resolveRunner(o.runner)
+	runner, err := resolveRunner(cmd.String("runner"))
 	if err != nil {
-		return fail("%v", err)
+		return usageError("%v", err)
 	}
 	risky, err := checkDotEnv(workspace)
 	if err != nil {
-		return fail("%v", err)
+		return usageError("%v", err)
 	}
 	if len(risky) > 0 {
 		msg := fmt.Sprintf("workspace .env sets %s, which can redirect the model endpoint or credentials", strings.Join(risky, ", "))
-		if !o.allowDotenv {
-			return fail("%s; refusing to run (override with -allow-dotenv)", msg)
+		if !cmd.Bool("allow-dotenv") {
+			return usageError("%s; refusing to run (override with --allow-dotenv)", msg)
 		}
 		fmt.Fprintf(os.Stderr, "%s %s\n", pal.yellow("uagent: warning:"), msg)
 	}
 	warning, err := checkAuth(o.provider)
 	if err != nil {
-		return fail("%v", err)
+		return usageError("%v", err)
 	}
 	if warning != "" {
 		fmt.Fprintf(os.Stderr, "%s %s\n", pal.yellow("uagent: warning:"), warning)
 	}
 
-	sessionID := o.session
+	sessionID := cmd.String("session")
 	if sessionID == "" {
 		sessionID = newUUID()
 	}
@@ -170,7 +255,7 @@ func runMain(args []string) int {
 	logsDir := filepath.Join(stateDir, "logs")
 	for _, dir := range []string{runDir, sessionsDir, logsDir} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return fail("%v", err)
+			return usageError("%v", err)
 		}
 	}
 
@@ -182,18 +267,18 @@ func runMain(args []string) int {
 	if o.model != "" {
 		request["model"] = o.model
 	}
-	if o.systemPrompt != "" {
-		request["system_prompt"] = o.systemPrompt
+	if v := cmd.String("system-prompt"); v != "" {
+		request["system_prompt"] = v
 	}
-	if len(o.disallow) > 0 {
-		request["disallowed_tools"] = []string(o.disallow)
+	if v := cmd.StringSlice("disallow"); len(v) > 0 {
+		request["disallowed_tools"] = v
 	}
-	if o.maxAttempts > 0 {
-		request["max_attempts"] = o.maxAttempts
+	if v := cmd.Int("max-attempts"); v > 0 {
+		request["max_attempts"] = v
 	}
 	requestJSON, _ := json.Marshal(request)
 	if err := os.WriteFile(filepath.Join(runDir, "request.json"), requestJSON, 0o600); err != nil {
-		return fail("%v", err)
+		return usageError("%v", err)
 	}
 
 	if !o.quiet {
@@ -220,13 +305,12 @@ func runMain(args []string) int {
 		sessionFile: filepath.Join(sessionsDir, sessionID+".session.jsonl"),
 		opsDir:      filepath.Join(sessionsDir, "operations", sessionID),
 		timeout:     o.timeout,
-		maxDisk:     maxDisk,
+		maxDisk:     o.maxDisk,
 		tracker:     tracker,
 		notify:      func(msg string) { fmt.Fprintf(os.Stderr, "%s %s\n", pal.yellow("uagent:"), msg) },
 	})
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s %v\n", pal.red("uagent:"), err)
-		return exitFailed
+		return cli.Exit(err.Error(), exitFailed)
 	}
 
 	tracker.Close(time.Now())
@@ -260,21 +344,20 @@ func runMain(args []string) int {
 	} else if summary.Answer != "" {
 		fmt.Println(summary.Answer)
 	}
-	return summary.ExitCode
+	if summary.ExitCode != exitOK {
+		return cli.Exit("", summary.ExitCode)
+	}
+	return nil
 }
 
 // runnerEnv pins provider, model, and base URL in the child environment. The
 // runner only applies .env values for variables that are not already set, so
 // pinning them (even to "") stops a workspace .env from overriding them.
 func runnerEnv(o options) []string {
-	baseURL := o.baseURL
-	if baseURL == "" {
-		baseURL = os.Getenv("UNREAL_HARNESS_LLM_BASE_URL")
-	}
 	pinned := map[string]string{
 		"UNREAL_HARNESS_LLM_PROVIDER": o.provider,
 		"UNREAL_HARNESS_LLM_MODEL":    o.model,
-		"UNREAL_HARNESS_LLM_BASE_URL": baseURL,
+		"UNREAL_HARNESS_LLM_BASE_URL": o.baseURL,
 	}
 	var env []string
 	for _, kv := range os.Environ() {
@@ -304,18 +387,11 @@ func exitCodeFor(status string) int {
 	}
 }
 
-func statsMain(args []string) int {
-	fs := flag.NewFlagSet("uagent stats", flag.ContinueOnError)
-	jsonOut := fs.Bool("json", false, "print summary JSON")
-	positional, err := parseInterspersed(fs, args)
-	if err != nil {
-		return exitUsage
+func statsAction(_ context.Context, cmd *cli.Command) error {
+	if cmd.Args().Len() != 1 {
+		return usageError("usage: uagent stats [--json] <run-dir|events.jsonl>")
 	}
-	if len(positional) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: uagent stats [-json] <run-dir|events.jsonl>")
-		return exitUsage
-	}
-	path := positional[0]
+	path := cmd.Args().First()
 	var summary Summary
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
 		// Keep run metadata (model, wall time, ...) from the saved summary; recompute stats from events.
@@ -326,8 +402,7 @@ func statsMain(args []string) int {
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "uagent: %v\n", err)
-		return exitFailed
+		return cli.Exit(err.Error(), exitFailed)
 	}
 	tracker := NewTracker(nil, false, palette{})
 	for line := range strings.Lines(string(data)) {
@@ -345,41 +420,20 @@ func statsMain(args []string) int {
 		summary.ExitCode = exitCodeFor(summary.Status)
 		summary.WallSeconds = summary.EventSeconds
 	}
-	if *jsonOut {
+	if cmd.Bool("json") {
 		encoded, _ := json.MarshalIndent(summary, "", "  ")
 		fmt.Println(string(encoded))
-		return exitOK
+		return nil
 	}
 	printSummary(os.Stdout, summary, newPalette(os.Stdout))
-	return exitOK
+	return nil
 }
 
-// parseInterspersed allows flags before and after positional arguments.
-// Everything after a literal "--" is positional.
-func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
-	var tail []string
-	if i := slices.Index(args, "--"); i >= 0 {
-		args, tail = args[:i], args[i+1:]
-	}
-	var positional []string
-	for {
-		if err := fs.Parse(args); err != nil {
-			return nil, err
-		}
-		args = fs.Args()
-		if len(args) == 0 {
-			break
-		}
-		positional, args = append(positional, args[0]), args[1:]
-	}
-	return append(positional, tail...), nil
-}
-
-func readPrompt(positional []string) (string, error) {
-	prompt := strings.Join(positional, " ")
+func readPrompt(args []string) (string, error) {
+	prompt := strings.Join(args, " ")
 	if prompt == "" || prompt == "-" {
 		if info, err := os.Stdin.Stat(); err == nil && info.Mode()&os.ModeCharDevice != 0 {
-			return "", errors.New("no prompt: pass it as an argument or pipe it on stdin (see -h)")
+			return "", errors.New("no prompt: pass it as an argument or pipe it on stdin (see --help)")
 		}
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -410,13 +464,6 @@ func displayModel(model string) string {
 		return "(provider default)"
 	}
 	return model
-}
-
-func envOr(name, fallback string) string {
-	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
-		return v
-	}
-	return fallback
 }
 
 func newUUID() string {

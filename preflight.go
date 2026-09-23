@@ -17,15 +17,13 @@ import (
 
 const runnerName = "unreal-agent-runner"
 
-// resolveRunner finds the runner: explicit path, $UAGENT_RUNNER, ~/.local/bin, then PATH.
+// resolveRunner finds the runner: explicit path (--runner / $UAGENT_RUNNER), ~/.local/bin, then PATH.
 func resolveRunner(explicit string) (string, error) {
-	for _, candidate := range []string{explicit, os.Getenv("UAGENT_RUNNER")} {
-		if candidate != "" {
-			if !isExecutable(candidate) {
-				return "", fmt.Errorf("runner %q is not an executable file", candidate)
-			}
-			return candidate, nil
+	if explicit != "" {
+		if !isExecutable(explicit) {
+			return "", fmt.Errorf("runner %q is not an executable file", explicit)
 		}
+		return explicit, nil
 	}
 	if home, err := os.UserHomeDir(); err == nil {
 		if p := filepath.Join(home, ".local", "bin", runnerName); isExecutable(p) {
@@ -86,10 +84,7 @@ func checkAuth(provider string) (warning string, err error) {
 	case "ollama":
 		return "", nil
 	default:
-		env, ok := keyed[provider]
-		if !ok {
-			return "", fmt.Errorf("unknown provider %q (want openai, openai-codex, openrouter, fireworks, ollama)", provider)
-		}
+		env := keyed[provider]
 		if strings.TrimSpace(os.Getenv("UNREAL_HARNESS_LLM_API_KEY")) == "" && strings.TrimSpace(os.Getenv(env)) == "" {
 			return "", fmt.Errorf("provider %s needs %s or UNREAL_HARNESS_LLM_API_KEY", provider, env)
 		}

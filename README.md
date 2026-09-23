@@ -4,10 +4,12 @@ A thin wrapper around [`unreal-agent-runner`](https://github.com/unreallabsai/un
 It runs one task, shows progress on stderr, prints the final answer on stdout,
 and saves stats for each run so you can compare it with `codex exec` / `claude -p`.
 
+Built with [urfave/cli v3](https://github.com/urfave/cli). Flags can go before or after the prompt; run `uagent --help` for all of them.
+
 ```sh
 GOBIN="$HOME/.local/bin" go install .
-uagent -effort medium -timeout 20m -C ~/code/proj "Fix the failing test in pkg/foo"
-uagent -json "..." | jq .tokens          # machine-readable summary
+uagent -e medium -t 20m -C ~/code/proj "Fix the failing test in pkg/foo"
+uagent --json "..." | jq .tokens          # machine-readable summary
 uagent stats ~/.local/state/unreal-agent/runs/<run>   # re-summarize a saved run
 ```
 
@@ -15,9 +17,9 @@ uagent stats ~/.local/state/unreal-agent/runs/<run>   # re-summarize a saved run
 
 | Risk | What uagent does |
 |---|---|
-| Session output inside the workspace grows without limit (issue #3) | Sessions and logs go to `~/.local/state/unreal-agent`. uagent refuses a `-state-dir` inside the workspace. `-max-disk` (default 5G) kills the run when tool output grows past the limit. |
+| Session output inside the workspace grows without limit (issue #3) | Sessions and logs go to `~/.local/state/unreal-agent`. uagent refuses a `--state-dir` inside the workspace. `--max-disk` (default 5G) kills the run when tool output grows past the limit. |
 | Workspace `.env` redirects the endpoint or credentials (issue #5) | uagent refuses to run if `.env` sets `UNREAL_HARNESS_*`, `OPENAI_CODEX_*`, `CODEX_HOME` or `*_PROXY`. It also sets provider, model and base URL for the runner, so `.env` cannot override them. |
-| No per-command timeout | `-timeout` (default 30m) sends SIGTERM, then SIGKILL, to the runner's process group and to every background tool process group that is still running. |
+| No per-command timeout | `--timeout` (default 30m) sends SIGTERM, then SIGKILL, to the runner's process group and to every background tool process group that is still running. |
 | Expired Codex token (the runner does not refresh it) | uagent checks the `exp` claim in `auth.json` before the run starts. |
 
 Exit codes: `0` ok · `1` failed · `2` usage or preflight error · `3` disk limit · `124` timeout · `130` interrupted.
