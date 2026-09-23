@@ -75,13 +75,24 @@ Every provider speaks the OpenAI Responses API and posts to `<base URL>/response
 `UNREAL_HARNESS_LLM_API_KEY` works for every keyed provider. uagent checks credentials and the model before starting, so a missing key or model fails immediately with exit code 2.
 
 ```sh
-uagent "..."                                                       # Codex subscription, gpt-6-sol
-uagent --provider openai "..."                                     # OpenAI API key, gpt-6-astra
-uagent --provider openrouter -m <vendor>/<model> "..."             # any OpenRouter model ID
-uagent --provider fireworks -m accounts/fireworks/models/<model> "..."
-uagent --provider ollama -m <model> "..."                          # a model pulled into local Ollama
-uagent --provider ollama --base-url http://gpu-box:11434/v1 -m <model> "..."
-uagent --provider openai --base-url http://localhost:8000/v1 -m <model> "..."  # any Responses-compatible server
+# Codex subscription (the default backend)
+uagent --provider openai-codex --model gpt-6-sol --effort high "..."
+
+# OpenAI API key
+uagent --provider openai --model gpt-6-astra --effort medium "..."
+
+# OpenRouter: any model ID it lists
+uagent --provider openrouter --model <vendor>/<model> --effort high "..."
+
+# Fireworks
+uagent --provider fireworks --model accounts/fireworks/models/<model> --effort medium "..."
+
+# Local Ollama, or Ollama on another machine
+uagent --provider ollama --model <model> --effort low "..."
+uagent --provider ollama --model <model> --effort low --base-url http://gpu-box:11434/v1 "..."
+
+# Any server that speaks the Responses API
+uagent --provider openai --model <model> --effort medium --base-url http://localhost:8000/v1 "..."
 ```
 
 The `openai` provider always needs `OPENAI_API_KEY` or `UNREAL_HARNESS_LLM_API_KEY`; for a local server that ignores keys, any value works.
