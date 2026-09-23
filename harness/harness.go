@@ -33,8 +33,11 @@ var errTimedOut = errors.New("run timed out")
 
 // Config configures a Harness.
 type Config struct {
-	// RunnerPath is the unreal-agent-runner executable; see FindRunner.
+	// RunnerPath is the unreal-agent-runner executable; see FindRunner. It is
+	// used when Backend is nil.
 	RunnerPath string
+	// Backend runs the agent (default: RunnerBackend with RunnerPath).
+	Backend Backend
 	// StateDir holds sessions, logs, and run records; see DefaultStateDir.
 	StateDir string
 	// MaxDisk kills a run when its tool output exceeds this many bytes (0 disables).
@@ -49,9 +52,10 @@ type Config struct {
 
 // Harness runs tasks and reads saved runs. It is safe for concurrent runs.
 type Harness struct {
-	cfg    Config
-	layout layout
-	log    *slog.Logger
+	cfg     Config
+	backend Backend
+	layout  layout
+	log     *slog.Logger
 }
 
 func New(cfg Config) *Harness {
@@ -65,7 +69,12 @@ func New(cfg Config) *Harness {
 		cfg.Getenv = os.Getenv
 	}
 
-	return &Harness{cfg: cfg, layout: layout{root: cfg.StateDir}, log: cfg.Logger.WithGroup("harness")}
+	backend := cfg.Backend
+	if backend == nil {
+		backend = RunnerBackend{Path: cfg.RunnerPath}
+	}
+
+	return &Harness{cfg: cfg, backend: backend, layout: layout{root: cfg.StateDir}, log: cfg.Logger.WithGroup("harness")}
 }
 
 // Run executes one task and waits for it: Start followed by Wait.

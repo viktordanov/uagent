@@ -155,7 +155,7 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 - Statistics for comparing the runner with other agents: wall time, model time, tool busy time, tool time that overlapped model time, turns, tool calls and failures, parallelism, and tokens.
 <!-- /memoria:section -->
 
-<!-- memoria:section id="library" files="core/run.go core/event.go core/stats.go core/finding.go harness/harness.go harness/run.go harness/lock.go harness/state.go harness/decode.go" -->
+<!-- memoria:section id="library" files="core/run.go core/event.go core/stats.go core/finding.go harness/harness.go harness/backend.go harness/run.go harness/lock.go harness/state.go harness/decode.go" -->
 ## Use it from Go
 
 The CLI is a thin layer over two packages, and a TUI or another tool can use them directly:
@@ -165,6 +165,7 @@ The CLI is a thin layer over two packages, and a TUI or another tool can use the
   - `Run(ctx, request, sink)` streams events to `sink` and returns the `Result`. `Start` does the same but returns a `Run` handle at once, with `Wait`, `Interrupt` (graceful), `Kill`, and `Done`.
   - A request carries either a `Prompt` or `Messages`, each with an ID. The runner echoes every message as a `UserMessage` event with the same ID, which confirms delivery.
   - `Preflight` checks a request without running it. `LockSession` is the per-session lock every run takes.
+  - `Config.Backend` swaps how the agent runs. The default, `RunnerBackend`, spawns the runner; another backend can run the runner's packages in process and keep every guard, the lock, and the run records. `Run.Process` returns the backend's handle.
   - `Runs` lists every run record, including runs in progress; `History` lists finished runs; `LoadRequest`, `LoadEvents`, and `Load` reopen one.
 
 ```go

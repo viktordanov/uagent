@@ -2,7 +2,6 @@ package harness
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,9 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -31,11 +28,10 @@ type processExit struct {
 	endedAt     time.Time
 }
 
-// process is one running unreal-agent-runner.
+// process is one running agent, started by the backend.
 type process struct {
 	h           *Harness
-	cmd         *exec.Cmd
-	pgid        int
+	agent       Process
 	log         *slog.Logger
 	sessionFile string
 	opsDir      string
@@ -43,12 +39,11 @@ type process struct {
 	events      *os.File
 	stderr      *os.File
 	readDone    chan struct{}
-	waitCh      chan struct{}
 }
 
 // startProcess writes the run records (request.json, a running summary.json,
-// events.jsonl, stderr.log), starts the runner in its own process group, and
-// decodes its stdout into events for sink until it exits.
+// events.jsonl, stderr.log), starts the agent through the backend, and
+// decodes its output into events for sink until it stops.
 func (h *Harness) startProcess(ctx context.Context, req core.Request, started time.Time, sink core.Sink) (*process, error) {
 	runDir := h.layout.runDir(req.RunID)
 	for _, dir := range []string{runDir, h.layout.sessionsDir(), h.layout.logsDir()} {
@@ -76,50 +71,33 @@ func (h *Harness) startProcess(ctx context.Context, req core.Request, started ti
 		return nil, fmt.Errorf("failed to create stderr file: %w", err)
 	}
 
-	// A raw pipe instead of StdoutPipe: Wait must not block on grandchildren
-	// that inherited stdout, and reading stops on our terms.
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		p.closeFiles()
 
-		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
+		return nil, fmt.Errorf("failed to create output pipe: %w", err)
 	}
 	p.pipe = pr
-	cmd := exec.Command(h.cfg.RunnerPath, //nolint:noctx // supervise handles cancellation, including tool process groups
-		"-workspace", req.Workspace,
-		"-session-directory", h.layout.sessionsDir(),
-		"-log-directory", h.layout.logsDir(),
-	)
-	cmd.Dir = req.Workspace
-	cmd.Env = runnerEnv(req)
-	cmd.Stdin = bytes.NewReader(request)
-	cmd.Stdout, cmd.Stderr = pw, p.stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := cmd.Start(); err != nil {
+	agent, err := h.backend.Start(ctx, Launch{
+		Request: req, RunnerRequest: request,
+		SessionsDir: h.layout.sessionsDir(), LogsDir: h.layout.logsDir(),
+		Stdout: pw, Stderr: p.stderr,
+	})
+	if err != nil {
 		_ = pw.Close()
 		_ = pr.Close()
 		p.closeFiles()
-		startErr := fmt.Errorf("failed to start runner: %w", err)
 		failed := core.Result{Request: req, Status: core.StatusFailed, StartedAt: started, RunnerExitCode: -1}
-		failed.Stats.Errors = []string{startErr.Error()}
+		failed.Stats.Errors = []string{err.Error()}
 
-		return nil, errors.Join(startErr, h.layout.saveSummary(failed))
+		return nil, errors.Join(err, h.layout.saveSummary(failed))
 	}
-	_ = pw.Close()
-	p.cmd, p.pgid = cmd, cmd.Process.Pid
-	p.log = h.log.With(
-		slog.String("run_id", req.RunID),
-		slog.Int("pgid", p.pgid),
-	)
-	p.log.LogAttrs(ctx, slog.LevelDebug, "runner started")
+	p.agent = agent
+	p.log = h.log.With(slog.String("run_id", req.RunID))
+	p.log.LogAttrs(ctx, slog.LevelDebug, "agent started")
 
 	p.readDone = make(chan struct{})
 	go p.read(ctx, sink)
-	p.waitCh = make(chan struct{})
-	go func() {
-		_ = cmd.Wait() // the exit code is read from ProcessState in finish
-		close(p.waitCh)
-	}()
 
 	return p, nil
 }
@@ -144,28 +122,28 @@ func (p *process) read(ctx context.Context, sink core.Sink) {
 	}
 }
 
-// supervise waits for the runner to exit and stops it on an interrupt, a kill,
+// supervise waits for the agent to stop and stops it on an interrupt, a kill,
 // the end of ctx (timeout or cancellation), or a disk overrun.
 func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}) core.Termination {
 	disk := time.NewTicker(diskPollInterval)
 	defer disk.Stop()
 	for {
 		select {
-		case <-p.waitCh:
+		case <-p.agent.Done():
 			return core.TerminationExited
 		case <-interrupt:
-			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping runner", slog.String("reason", "interrupt"))
+			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping agent", slog.String("reason", "interrupt"))
 			p.stopGracefully()
 
 			return core.TerminationInterrupted
 		case <-kill:
-			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping runner", slog.String("reason", "kill"))
+			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping agent", slog.String("reason", "kill"))
 			p.teardown()
 
 			return core.TerminationInterrupted
 		case <-ctx.Done():
 			cause := context.Cause(ctx)
-			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping runner", slog.String("reason", cause.Error()))
+			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping agent", slog.String("reason", cause.Error()))
 			p.stopGracefully()
 			if errors.Is(cause, errTimedOut) {
 				return core.TerminationTimeout
@@ -177,7 +155,7 @@ func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}
 				continue
 			}
 			if used := dirSize(p.opsDir); used > p.h.cfg.MaxDisk {
-				p.log.LogAttrs(ctx, slog.LevelInfo, "stopping runner",
+				p.log.LogAttrs(ctx, slog.LevelInfo, "stopping agent",
 					slog.String("reason", "disk limit"),
 					slog.Int64("used_bytes", used),
 					slog.Int64("limit_bytes", p.h.cfg.MaxDisk))
@@ -189,40 +167,42 @@ func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}
 	}
 }
 
-// stopGracefully sends SIGINT to the runner so it can record its state and
-// stop its tools, then falls back to teardown after the grace period.
+// stopGracefully interrupts the agent so it can record its state and stop
+// its tools, then falls back to teardown after the grace period.
 func (p *process) stopGracefully() {
-	_ = syscall.Kill(p.pgid, syscall.SIGINT) // ESRCH means it already exited
+	p.agent.Interrupt()
 	select {
-	case <-p.waitCh:
+	case <-p.agent.Done():
 	case <-time.After(p.h.cfg.KillGrace):
 		p.teardown()
 	}
 }
 
-// teardown stops the runner's process group and every still-running
-// background tool group: SIGTERM, a grace period, then SIGKILL.
+// teardown stops the agent and every still-running background tool group:
+// SIGTERM, a grace period, then SIGKILL.
 func (p *process) teardown() {
-	groups := append([]int{p.pgid}, liveOperationGroups(p.sessionFile)...)
+	groups := liveOperationGroups(p.sessionFile)
+	p.agent.Terminate()
 	signalGroups(groups, syscall.SIGTERM)
 	select {
-	case <-p.waitCh:
+	case <-p.agent.Done():
 	case <-time.After(p.h.cfg.KillGrace):
+		p.agent.Kill()
 		signalGroups(groups, syscall.SIGKILL)
-		<-p.waitCh
+		<-p.agent.Done()
 	}
 }
 
-// finish reaps anything the runner left behind, drains its output, and closes the run files.
+// finish reaps anything the agent left behind, drains its output, and closes the run files.
 func (p *process) finish(ctx context.Context, termination core.Termination) processExit {
-	<-p.waitCh
-	// The runner is gone. Its process group and the tools it still records as
+	<-p.agent.Done()
+	// The agent is gone. Its process group and the tools it still records as
 	// running are orphans; nothing of this run may outlive it.
 	if orphans := liveOperationGroups(p.sessionFile); len(orphans) > 0 {
 		p.log.LogAttrs(ctx, slog.LevelInfo, "killing orphaned tools", slog.Int("groups", len(orphans)))
 		signalGroups(orphans, syscall.SIGKILL)
 	}
-	signalGroups([]int{p.pgid}, syscall.SIGKILL)
+	p.agent.Kill()
 
 	select {
 	case <-p.readDone:
@@ -233,7 +213,7 @@ func (p *process) finish(ctx context.Context, termination core.Termination) proc
 	_ = p.pipe.Close()
 	p.closeFiles()
 
-	return processExit{code: p.cmd.ProcessState.ExitCode(), termination: termination, endedAt: time.Now()}
+	return processExit{code: p.agent.ExitCode(), termination: termination, endedAt: time.Now()}
 }
 
 func (p *process) closeFiles() {
@@ -291,29 +271,6 @@ func liveOperationGroups(sessionFile string) []int {
 	}
 
 	return groups
-}
-
-// runnerEnv pins provider, model, and base URL. The runner applies workspace
-// .env values only to unset variables, so pinning them (even to "") stops a
-// workspace .env from overriding them.
-func runnerEnv(req core.Request) []string {
-	pinned := map[string]string{
-		"UNREAL_HARNESS_LLM_PROVIDER": req.Provider,
-		"UNREAL_HARNESS_LLM_MODEL":    req.Model,
-		"UNREAL_HARNESS_LLM_BASE_URL": req.BaseURL,
-	}
-	var env []string
-	for _, kv := range os.Environ() {
-		name, _, _ := strings.Cut(kv, "=")
-		if _, ok := pinned[name]; !ok {
-			env = append(env, kv)
-		}
-	}
-	for name, value := range pinned {
-		env = append(env, name+"="+value)
-	}
-
-	return env
 }
 
 func dirSize(dir string) int64 {

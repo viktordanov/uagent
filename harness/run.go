@@ -48,6 +48,10 @@ func (r *Run) Kill() {
 	r.killOnce.Do(func() { close(r.kill) })
 }
 
+// Process is the backend's handle on the agent, for backends that offer more
+// than the Process methods.
+func (r *Run) Process() Process { return r.proc.agent }
+
 // Done is closed when the run has finished and Wait would not block.
 func (r *Run) Done() <-chan struct{} { return r.done }
 
