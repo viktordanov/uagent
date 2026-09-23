@@ -1,0 +1,13 @@
+# mockery v3 (v2 cannot load Go 1.27 packages). Mocks are generated, not committed.
+dir: testing/mocks
+pkgname: mocks
+filename: "mock_{{.InterfaceName | snakecase}}.go"
+structname: "Mock{{.InterfaceName}}"
+template: testify
+packages:
+  github.com/viktordanov/uagent/domain:
+    interfaces:
+      Preflight: {}
+      Runner: {}
+      RunStore: {}
+      EventSink: {}

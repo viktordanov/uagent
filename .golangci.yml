@@ -1,0 +1,241 @@
+# Adapted from aicore's .golangci.yml: same linters plus sloglint.
+version: "2"
+run:
+  timeout: 5m
+  tests: false
+
+linters:
+  default: none
+  enable:
+    # linters that apply specific rules
+    - bidichk
+    - bodyclose
+    - canonicalheader
+    - contextcheck
+    - decorder
+    - dogsled
+    - dupl
+    - durationcheck
+    - errcheck
+    - embeddedstructfieldcheck
+    - forcetypeassert
+    - funlen
+    - gocheckcompilerdirectives
+    - goconst
+    - ineffassign
+    - misspell
+    - nilnesserr
+    - nlreturn
+    - predeclared
+    - reassign
+    - rowserrcheck
+    - testpackage
+    - unconvert
+    - usestdlibvars
+    - wastedassign
+
+    # experimental linters
+    - asasalint
+    - modernize
+    - copyloopvar
+    - errchkjson
+    - errname
+    - intrange
+    - mirror
+    - nilnil
+    - noctx
+    - nosprintfhostport
+    - perfsprint
+    - sqlclosecheck
+    - unparam
+    - usestdlibvars
+    - usetesting
+
+    # broad linters with configurable rulesets
+    - gocritic
+    - revive
+    - staticcheck
+    - govet
+
+    # structured logging (go-logging skill); render/ and cmd/ print to terminals on purpose
+    - sloglint
+
+    # linters to potentially enable later
+    # - err113
+    # - exhaustive
+    # - funcorder
+    # - godoclint
+    # - gosec
+    # - nestif
+    # - spancheck   # otel
+
+  settings:
+    errcheck:
+      exclude-functions:
+        - (net/http.ResponseWriter).Write
+        - (*encoding/json.Encoder).Encode
+
+    exhaustive:
+      default-signifies-exhaustive: true
+    sloglint:
+      attr-only: true
+      context: scope
+      static-msg: true
+      key-naming-case: snake
+      args-on-sep-lines: true
+      no-global: all
+    forbidigo:
+      forbid:
+        - pattern: ^print.*$
+        - pattern: fmt\.Print.*
+        - pattern: ioutil\.*
+    funlen:
+      lines: -1
+      statements: -1
+      ignore-comments: true
+
+    gocritic:
+      disable-all: true
+      enabled-checks:
+        # Diagnostic
+        - appendAssign
+        - argOrder
+        - badCall
+        - badCond
+        - caseOrder
+        - codegenComment
+        - deprecatedComment
+        - dupArg
+        - dupBranchBody
+        - dupCase
+        - dupSubExpr
+        - exitAfterDefer
+        - externalErrorReassign
+        - flagDeref
+        - flagName
+        - mapKey
+        - offBy1
+        - sloppyReassign
+        - sloppyTypeAssert
+        - sprintfQuotedString
+        - unnecessaryDefer
+
+        # Style
+        - assignOp
+        - captLocal
+        - commentFormatting
+        - defaultCaseOrder
+        - dupImport
+        - elseif
+        - emptyStringTest
+        - httpNoBody
+        - methodExprCall
+        - nestingReduce
+        - newDeref
+        - redundantSprint
+        - regexpMust
+        - singleCaseSwitch
+        - sloppyLen
+        - switchTrue
+        - timeExprSimplify
+        - typeAssertChain
+        - typeSwitchVar
+        - underef
+        - unlambda
+        - unslice
+        - valSwap
+        - wrapperFunc
+
+        # Performance
+        - appendCombine
+        - equalFold
+        - preferFprint
+        - preferStringWriter
+        - preferWriteByte
+        - rangeExprCopy
+
+    nlreturn:
+      block-size: 6
+
+    modernize:
+      disable:
+        - minmax
+
+    revive:
+      rules:
+        - name: time-equal
+          severity: warning
+          disabled: false
+        - name: if-return
+          severity: warning
+          disabled: false
+        - name: empty-block
+          severity: warning
+          disabled: false
+        - name: modifies-parameter
+          severity: warning
+          disabled: false
+        - name: deep-exit
+          severity: warning
+          disabled: false
+        - name: unused-parameter
+          severity: warning
+          disabled: false
+        - name: struct-tag
+          severity: warning
+          disabled: false
+        - name: defer
+          severity: warning
+          disabled: false
+        - name: useless-break
+          severity: warning
+          disabled: false
+        - name: use-any
+          severity: warning
+          disabled: false
+        - name: datarace
+          severity: warning
+          disabled: false
+        - name: redundant-import-alias
+          severity: warning
+          disabled: false
+        - name: range-val-in-closure
+          severity: warning
+          disabled: true
+        - name: range-val-address
+          severity: warning
+          disabled: true
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+
+    rules:
+      - linters:
+          - dupl
+          - err113
+          - funlen
+        path: _test\.go
+      - path: (.+)\.go$
+        text: ST1000
+
+    paths:
+      - testing/mocks
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  enable:
+    - gofumpt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
