@@ -104,12 +104,14 @@ func (h *Harness) Start(ctx context.Context, req core.Request, sink core.Sink) (
 	if req.SessionID == "" {
 		req.SessionID = uuid.NewString()
 	}
-	if req.RunID == "" {
-		req.RunID = core.NewRunID(started, req.SessionID)
-	}
 	unlock, err := LockSession(h.cfg.StateDir, req.SessionID)
 	if err != nil {
 		return nil, err
+	}
+	if req.RunID == "" {
+		// Runs of one session can start within the same second; the lock
+		// makes this check and the directory creation race-free.
+		req.RunID = h.layout.unusedRunID(core.NewRunID(started, req.SessionID))
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -476,4 +477,21 @@ func jsonField(t *testing.T, data []byte, field string) string {
 	require.NoError(t, json.Unmarshal(data, &obj))
 
 	return string(obj[field])
+}
+
+func TestRun_QuickRunsOfOneSessionKeepSeparateRecords(t *testing.T) {
+	e := newTestEnv(t, "simple.jsonl")
+	session := func(r *core.Request) { r.SessionID = "5a5a5a5a-1111-4222-8333-444455556666" }
+
+	var ids []string
+	for range 3 {
+		result, err := e.run(t, context.Background(), session)
+		require.NoError(t, err)
+		ids = append(ids, result.Request.RunID)
+	}
+
+	assert.Len(t, slices.Compact(slices.Sorted(slices.Values(ids))), 3, "run IDs %v", ids)
+	records, err := e.h.Runs()
+	require.NoError(t, err)
+	assert.Len(t, records, 3)
 }

@@ -50,6 +50,18 @@ func (l layout) operationsDir(id string) string {
 	return filepath.Join(l.sessionsDir(), "operations", id)
 }
 
+// unusedRunID returns base, or base with the lowest "-N" suffix whose run
+// directory does not exist yet.
+func (l layout) unusedRunID(base string) string {
+	id := base
+	for n := 2; ; n++ {
+		if _, err := os.Stat(l.runDir(id)); errors.Is(err, fs.ErrNotExist) {
+			return id
+		}
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
+}
+
 // saveSummary writes summary.json in the stream summary schema.
 func (l layout) saveSummary(result core.Result) error {
 	encoded, err := json.MarshalIndent(stream.SummaryToDTO(result), "", "  ")
