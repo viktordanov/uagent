@@ -9,6 +9,7 @@
 //	FAKERUNNER_EXIT     exit code after the replay (default 0)
 //	FAKERUNNER_HANG     "1" starts background tools and waits to be killed; "orphan" starts them and exits
 //	FAKERUNNER_CAPTURE  directory that receives stdin.json, env.txt, and the pids of hung tools
+//	FAKERUNNER_ECHO     "1" first writes an input item for each request message, as the runner does
 package main
 
 import (
@@ -48,6 +49,10 @@ func run(sessionDir string) (int, error) {
 	}
 	var req struct {
 		SessionID string `json:"session_id"`
+		Messages  []struct {
+			Content   string `json:"content"`
+			MessageID string `json:"message_id"`
+		} `json:"messages"`
 	}
 	if err := json.Unmarshal(stdin, &req); err != nil {
 		return 0, fmt.Errorf("decode request: %w", err)
@@ -63,6 +68,24 @@ func run(sessionDir string) (int, error) {
 		}
 	}
 
+	if os.Getenv("FAKERUNNER_ECHO") == "1" {
+		for _, m := range req.Messages {
+			payload, err := json.Marshal(m.Content)
+			if err != nil {
+				return 0, err
+			}
+			item, err := json.Marshal(echoItem{
+				RecordedAt: time.Now().UTC(), Kind: "input",
+				Data: echoInput{ID: m.MessageID, Kind: "external", Payload: payload},
+			})
+			if err != nil {
+				return 0, err
+			}
+			if _, err := os.Stdout.Write(append(item, '\n')); err != nil {
+				return 0, err
+			}
+		}
+	}
 	if err := replay(os.Getenv("FAKERUNNER_FIXTURE"), os.Getenv("FAKERUNNER_SPEED")); err != nil {
 		return 0, err
 	}
@@ -81,6 +104,20 @@ func run(sessionDir string) (int, error) {
 	code, _ := strconv.Atoi(os.Getenv("FAKERUNNER_EXIT"))
 
 	return code, nil
+}
+
+// echoItem is a session item in the runner's stdout format.
+type echoItem struct {
+	Sequence   int64     `json:"Sequence"`
+	RecordedAt time.Time `json:"RecordedAt"`
+	Kind       string    `json:"Kind"`
+	Data       echoInput `json:"Data"`
+}
+
+type echoInput struct {
+	ID      string          `json:"ID"`
+	Kind    string          `json:"Kind"`
+	Payload json.RawMessage `json:"Payload"`
 }
 
 func replay(path, speedText string) error {

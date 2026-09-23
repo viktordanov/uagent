@@ -46,7 +46,7 @@ func exitCode(err error) int {
 	switch {
 	case errors.As(err, &exitErr):
 		code = exitErr.ExitCode()
-	case errors.Is(err, harness.ErrPreflightBlocked):
+	case errors.Is(err, harness.ErrPreflightBlocked), errors.Is(err, harness.ErrSessionBusy):
 		code = exitUsage
 	}
 	if msg := err.Error(); msg != "" {

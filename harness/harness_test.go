@@ -324,3 +324,156 @@ func assertAllDead(t *testing.T, pidFile string) {
 			"process %d should be dead", pid)
 	}
 }
+
+func (e *testEnv) start(t *testing.T, mods ...func(*core.Request)) *harness.Run {
+	t.Helper()
+	run, err := e.h.Start(context.Background(), e.request(mods...), func(ev core.Event) { e.events = append(e.events, ev) })
+	require.NoError(t, err)
+
+	return run
+}
+
+func TestStart_SessionLock(t *testing.T) {
+	e := newTestEnv(t, "timeout.jsonl")
+	t.Setenv("FAKERUNNER_HANG", "1")
+	session := func(r *core.Request) { r.SessionID = "7f0c2a1e-1111-4222-8333-444455556666" }
+	first := e.start(t, session)
+
+	_, err := e.h.Start(context.Background(), e.request(session), func(core.Event) {})
+
+	require.ErrorIs(t, err, harness.ErrSessionBusy)
+	first.Interrupt()
+	result, err := first.Wait()
+	require.NoError(t, err)
+	assert.Equal(t, core.StatusInterrupted, result.Status)
+
+	t.Setenv("FAKERUNNER_HANG", "")
+	t.Setenv("FAKERUNNER_FIXTURE", fixtures.Path("simple.jsonl"))
+	again, err := e.h.Run(context.Background(), e.request(session), func(core.Event) {})
+	require.NoError(t, err, "the lock is released when the first run ends")
+	assert.Equal(t, core.StatusOK, again.Status)
+}
+
+func TestRun_Handle(t *testing.T) {
+	tests := map[string]func(*harness.Run){
+		"interrupt sends SIGINT and stops gracefully": (*harness.Run).Interrupt,
+		"kill tears down at once":                     (*harness.Run).Kill,
+	}
+	for name, stop := range tests {
+		t.Run(name, func(t *testing.T) {
+			e := newTestEnv(t, "timeout.jsonl")
+			t.Setenv("FAKERUNNER_HANG", "1")
+			run := e.start(t)
+			require.Eventually(t, func() bool {
+				_, err := os.Stat(filepath.Join(e.capture, "hung.pids"))
+
+				return err == nil
+			}, 5*time.Second, 10*time.Millisecond, "the runner started its tools")
+
+			stop(run)
+			result, err := run.Wait()
+
+			require.NoError(t, err)
+			assert.Equal(t, core.StatusInterrupted, result.Status)
+			assertAllDead(t, filepath.Join(e.capture, "hung.pids"))
+			assert.IsType(t, core.RunFinished{}, e.events[len(e.events)-1])
+			select {
+			case <-run.Done():
+			default:
+				t.Fatal("Done is closed after Wait")
+			}
+		})
+	}
+}
+
+func TestRun_Messages(t *testing.T) {
+	t.Run("messages reach the runner with IDs and are acknowledged", func(t *testing.T) {
+		e := newTestEnv(t, "simple.jsonl")
+		t.Setenv("FAKERUNNER_ECHO", "1")
+
+		result, err := e.run(t, context.Background(), func(r *core.Request) {
+			r.Prompt = ""
+			r.Messages = []core.UserInput{{Text: "first"}, {ID: "b2c3d4e5-0000-4000-8000-000000000002", Text: "second"}}
+		})
+
+		require.NoError(t, err)
+		require.Len(t, result.Request.Messages, 2)
+		firstID := result.Request.Messages[0].ID
+		assert.NotEmpty(t, firstID, "a missing ID is generated")
+		stdin, err := os.ReadFile(filepath.Join(e.capture, "stdin.json"))
+		require.NoError(t, err)
+		assert.JSONEq(t, `[{"role":"user","content":"first","message_id":"`+firstID+`"},`+
+			`{"role":"user","content":"second","message_id":"b2c3d4e5-0000-4000-8000-000000000002"}]`,
+			jsonField(t, stdin, "messages"))
+		var acked []string
+		for _, ev := range e.events {
+			if m, ok := ev.(core.UserMessage); ok {
+				acked = append(acked, m.ID)
+			}
+		}
+		assert.Equal(t, []string{firstID, "b2c3d4e5-0000-4000-8000-000000000002", "7cb42beb-329b-4c7b-8c2f-abced68ef095"}, acked)
+	})
+
+	t.Run("invalid requests are rejected before anything starts", func(t *testing.T) {
+		tests := map[string]func(*core.Request){
+			"prompt and messages": func(r *core.Request) { r.Messages = []core.UserInput{{Text: "x"}} },
+			"neither":             func(r *core.Request) { r.Prompt = "" },
+			"empty message":       func(r *core.Request) { r.Prompt, r.Messages = "", []core.UserInput{{Text: " "}} },
+		}
+		for name, mod := range tests {
+			t.Run(name, func(t *testing.T) {
+				e := newTestEnv(t, "simple.jsonl")
+
+				_, err := e.run(t, context.Background(), mod)
+
+				require.Error(t, err)
+				assert.Empty(t, e.events)
+				assert.NoDirExists(t, filepath.Join(e.stateDir, "runs"))
+			})
+		}
+	})
+}
+
+func TestRuns_IncludesRunsInProgress(t *testing.T) {
+	e := newTestEnv(t, "timeout.jsonl")
+	t.Setenv("FAKERUNNER_HANG", "1")
+	run := e.start(t)
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(filepath.Join(e.capture, "hung.pids"))
+
+		return err == nil
+	}, 5*time.Second, 10*time.Millisecond, "the runner wrote its output and started its tools")
+
+	records, err := e.h.Runs()
+	require.NoError(t, err)
+	require.Len(t, records, 1)
+	assert.False(t, records[0].Complete)
+	assert.Equal(t, core.StatusRunning, records[0].Result.Status)
+	history, err := e.h.History()
+	require.NoError(t, err)
+	assert.Empty(t, history, "History lists finished runs only")
+	req, err := harness.LoadRequest(records[0].Dir)
+	require.NoError(t, err)
+	assert.Equal(t, "Summarize this project.", req.Prompt)
+	assert.Equal(t, run.RunID(), req.RunID)
+	assert.Equal(t, run.SessionID(), req.SessionID)
+
+	run.Interrupt()
+	_, err = run.Wait()
+	require.NoError(t, err)
+	records, err = e.h.Runs()
+	require.NoError(t, err)
+	assert.True(t, records[0].Complete)
+	assert.Equal(t, core.StatusInterrupted, records[0].Result.Status)
+	var loaded []core.Event
+	require.NoError(t, harness.LoadEvents(records[0].Dir, func(ev core.Event) { loaded = append(loaded, ev) }))
+	assert.NotEmpty(t, loaded)
+}
+
+func jsonField(t *testing.T, data []byte, field string) string {
+	t.Helper()
+	var obj map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(data, &obj))
+
+	return string(obj[field])
+}

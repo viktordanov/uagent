@@ -5,11 +5,21 @@ package core
 
 import "time"
 
+// UserInput is one user message with the ID the runner deduplicates on.
+type UserInput struct {
+	ID   string
+	Text string
+}
+
 // Request is one task for unreal-agent-runner plus the guards around it.
+// Set either Prompt or Messages.
 type Request struct {
-	RunID           string
-	SessionID       string
-	Prompt          string
+	RunID     string
+	SessionID string
+	Prompt    string
+	// Messages are delivered in order with their IDs, so the runner can
+	// acknowledge each one and ignore repeats.
+	Messages        []UserInput
 	Provider        string
 	Model           string
 	Effort          string
@@ -37,6 +47,9 @@ type Result struct {
 type Status string
 
 const (
+	// StatusRunning marks a run that has started and not finished. A run
+	// record that stays running means uagent stopped before the run ended.
+	StatusRunning     Status = "running"
 	StatusOK          Status = "ok"
 	StatusFailed      Status = "error"
 	StatusTimeout     Status = "timeout"

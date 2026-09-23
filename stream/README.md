@@ -38,17 +38,20 @@ Ignore unknown `type` values and unknown fields so that additive changes do not 
 | --- | --- | --- |
 | `run_started` | `run_id`, `session_id`, `provider`, `model`, `effort`, `workspace` | Always first. `run_id` names the run directory. |
 | `preflight_warning` | `code`, `message` | A non-blocking preflight finding, such as `auth_expiring`. |
-| `turn_started` | `turn` | The runner sent a request to the model. Turns count from 1. |
-| `model_responded` | `turn`, `duration_ms`, `usage`, `stop`, `failure` | The model answered. `usage` has `input`, `cached_input`, `cache_write_input`, `output`, and `reasoning` token counts. `stop` and `failure` are omitted when normal. |
-| `tool_called` | `call_id`, `name`, `label` | The model asked for a tool. `label` is the Bash command or the raw arguments, on one line. |
-| `tool_started` | `call_id`, `op_id`, `name`, `label` | The runner started the operation for a call. |
-| `tool_finished` | `call_id`, `op_id`, `name`, `label`, `ok`, `detail`, `duration_ms` | The operation ended. `detail` is `exit N`, a status, or an error. `op_id` is omitted when the call failed before an operation started. |
-| `assistant_message` | `text`, `final` | Assistant text. `final: true` marks the final answer. |
-| `reasoning` | `text` | One reasoning summary line. |
+| `user_message` | `id`, `text` | The runner accepted a user message. `id` is the message ID it deduplicates on, so it acknowledges delivery of a message sent with that ID. |
+| `control_input` | `id`, `mode`, `effort`, `reason` | The runner accepted a control message: `settings` (with `effort`), `when_idle`, `hard`, or `heartbeat` (with `reason`). |
+| `turn_started` | `turn`, `turn_id` | The runner sent a request to the model. Turns count from 1; `turn_id` is the runner's ID for the turn. |
+| `model_responded` | `turn`, `turn_id`, `duration_ms`, `usage`, `stop`, `failure` | The model answered. `usage` has `input`, `cached_input`, `cache_write_input`, `output`, and `reasoning` token counts. `stop` and `failure` are omitted when normal. |
+| `tool_called` | `call_id`, `name`, `label`, `arguments` | The model asked for a tool. `label` is the Bash command or the raw arguments, on one line; `arguments` is the raw JSON. |
+| `tool_started` | `call_id`, `op_id`, `name`, `label`, `op_type` | The runner started the operation for a call. `op_type` is the runner's operation type, such as `shell`. |
+| `tool_finished` | `call_id`, `op_id`, `name`, `label`, `ok`, `detail`, `duration_ms`, `op_type`, `out_path`, `err_path` | The operation ended. `detail` is `exit N`, a status, or an error. `op_id` is omitted when the call failed before an operation started. `out_path` and `err_path` name the files holding a shell command's full output. |
+| `assistant_message` | `turn`, `text`, `final` | Assistant text from a turn. `final: true` marks the final answer. |
+| `reasoning` | `turn`, `text` | One reasoning summary line. |
 | `runner_error` | `message` | The runner reported an error or printed a line that is not JSON. |
 | `run_finished` | `summary` | Always last. See the summary below. |
 
 A tool that is still running when the run is killed has a `tool_started` line and no `tool_finished` line.
+The runner reports output files once an operation has finished, so `out_path` and `err_path` appear on `tool_finished` and are usually absent from `tool_started`.
 <!-- /memoria:section -->
 
 <!-- memoria:section id="contract" files="serialization.go" -->
@@ -58,14 +61,14 @@ A tool that is still running when the run is killed has a `tool_started` line an
 
 | Field | Meaning |
 | --- | --- |
-| `status` | `ok`, `error`, `timeout`, `interrupted`, or `disk_limit` |
+| `status` | `ok`, `error`, `timeout`, `interrupted`, or `disk_limit`; `running` in `summary.json` while the run is in progress |
 | `runner_exit_code` | Exit code of unreal-agent-runner, or -1 when it was killed |
 | `run_id`, `session_id`, `provider`, `model`, `effort`, `workspace` | The run's identity and settings |
 | `started_at`, `wall_ms` | Start time (UTC) and wall-clock duration |
 | `stats` | Aggregated statistics, described below |
 | `answer` | The final answer, or the last assistant text when there was none |
 
-`stats` has `event_span_ms`, `model_ms`, `tool_busy_ms`, `tool_model_overlap_ms`, `turns`, `model_responses`, `tool_calls`, `failed_tool_calls`, `max_parallel_tools`, `tools_by_name`, `tokens`, and `final_answer`.
+`stats` has `event_span_ms`, `model_ms`, `tool_busy_ms`, `tool_model_overlap_ms`, `turns`, `user_messages`, `model_responses`, `tool_calls`, `failed_tool_calls`, `max_parallel_tools`, `tools_by_name`, `tokens`, and `final_answer`.
 It also has `stop_reasons`, `failures`, `errors`, and `warnings`, which are omitted when empty.
 `tool_model_overlap_ms` is the time tools ran while the model was generating, which is where the runner's asynchronous tools save time.
 

@@ -11,18 +11,31 @@ import (
 // session item (Sequence/RecordedAt/Kind/Data) or {"type":"error"}.
 
 type requestDTO struct {
-	Prompt          string   `json:"prompt"`
-	ThinkingLevel   string   `json:"thinking_level,omitempty"`
-	Model           string   `json:"model,omitempty"`
-	SessionID       string   `json:"session_id,omitempty"`
-	SystemPrompt    string   `json:"system_prompt,omitempty"`
-	DisallowedTools []string `json:"disallowed_tools,omitempty"`
-	MaxAttempts     int      `json:"max_attempts,omitempty"`
+	Prompt          string              `json:"prompt,omitempty"`
+	Messages        []requestMessageDTO `json:"messages,omitempty"`
+	ThinkingLevel   string              `json:"thinking_level,omitempty"`
+	Model           string              `json:"model,omitempty"`
+	SessionID       string              `json:"session_id,omitempty"`
+	SystemPrompt    string              `json:"system_prompt,omitempty"`
+	DisallowedTools []string            `json:"disallowed_tools,omitempty"`
+	MaxAttempts     int                 `json:"max_attempts,omitempty"`
+}
+
+type requestMessageDTO struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	MessageID string `json:"message_id,omitempty"`
 }
 
 func requestToDTO(req core.Request) requestDTO {
+	messages := make([]requestMessageDTO, 0, len(req.Messages))
+	for _, m := range req.Messages {
+		messages = append(messages, requestMessageDTO{Role: "user", Content: m.Text, MessageID: m.ID})
+	}
+
 	return requestDTO{
 		Prompt:          req.Prompt,
+		Messages:        messages,
 		ThinkingLevel:   req.Effort,
 		Model:           req.Model,
 		SessionID:       req.SessionID,
@@ -30,6 +43,25 @@ func requestToDTO(req core.Request) requestDTO {
 		DisallowedTools: req.DisallowedTools,
 		MaxAttempts:     req.MaxAttempts,
 	}
+}
+
+// requestFromDTO restores the fields request.json carries. Provider,
+// workspace, and guards are not part of the runner request.
+func requestFromDTO(d requestDTO) core.Request {
+	req := core.Request{
+		SessionID:       d.SessionID,
+		Prompt:          d.Prompt,
+		Model:           d.Model,
+		Effort:          d.ThinkingLevel,
+		SystemPrompt:    d.SystemPrompt,
+		DisallowedTools: d.DisallowedTools,
+		MaxAttempts:     d.MaxAttempts,
+	}
+	for _, m := range d.Messages {
+		req.Messages = append(req.Messages, core.UserInput{ID: m.MessageID, Text: m.Content})
+	}
+
+	return req
 }
 
 type itemDTO struct {
@@ -93,7 +125,28 @@ func (u usageDTO) toCore() core.Tokens {
 	}
 }
 
+// inputDTO is an inbox input the runner persisted: a user message
+// ("external", with a JSON string payload) or a control message.
+type inputDTO struct {
+	ID      string          `json:"ID"`
+	Kind    string          `json:"Kind"`
+	Payload json.RawMessage `json:"Payload"`
+}
+
+type controlDTO struct {
+	Mode       string `json:"Mode"`
+	Reason     string `json:"Reason"`
+	Parameters struct {
+		ReasoningEffort string `json:"ReasoningEffort"`
+	} `json:"Parameters"`
+}
+
+type turnDTO struct {
+	ID string `json:"ID"`
+}
+
 type toolCallStatusDTO struct {
+	TurnID string `json:"TurnID"`
 	CallID string `json:"CallID"`
 	Status struct {
 		Error string `json:"Error"`
@@ -114,6 +167,8 @@ type shellStateDTO struct {
 		ExitCode int `json:"ExitCode"`
 	} `json:"Result"`
 	TerminalError string `json:"TerminalError"`
+	OutPath       string `json:"OutPath"`
+	ErrPath       string `json:"ErrPath"`
 }
 
 // sessionRecordDTO is one line of the runner's session file.

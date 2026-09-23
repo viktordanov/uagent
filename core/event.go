@@ -26,14 +26,34 @@ type PreflightWarning struct {
 	Message string
 }
 
-type TurnStarted struct {
+// UserMessage is a message the runner accepted from the user. ID is the
+// message ID the runner deduplicates on; it acknowledges delivery.
+type UserMessage struct {
 	At   time.Time
-	Turn int
+	ID   string
+	Text string
+}
+
+// ControlInput is a control message the runner accepted: "settings" (with
+// Effort), "when_idle", "hard", or "heartbeat" (with Reason).
+type ControlInput struct {
+	At     time.Time
+	ID     string
+	Mode   string
+	Effort string
+	Reason string
+}
+
+type TurnStarted struct {
+	At     time.Time
+	Turn   int
+	TurnID string
 }
 
 type ModelResponded struct {
 	At       time.Time
 	Turn     int
+	TurnID   string
 	Duration time.Duration
 	Usage    Tokens
 	// Stop is empty or "complete" for a normal response.
@@ -46,6 +66,8 @@ type ToolCalled struct {
 	CallID string
 	Name   string
 	Label  string
+	// Arguments is the raw JSON the model sent.
+	Arguments string
 }
 
 type ToolStarted struct {
@@ -54,6 +76,11 @@ type ToolStarted struct {
 	OpID   string
 	Name   string
 	Label  string
+	// OpType is the runner operation type, such as "shell".
+	OpType string
+	// OutPath and ErrPath are the files a shell operation writes its output to.
+	OutPath string
+	ErrPath string
 }
 
 // ToolFinished ends a tool operation. OpID is empty when the call failed
@@ -67,16 +94,21 @@ type ToolFinished struct {
 	OK       bool
 	Detail   string
 	Duration time.Duration
+	OpType   string
+	OutPath  string
+	ErrPath  string
 }
 
 type AssistantMessage struct {
 	At    time.Time
+	Turn  int
 	Text  string
 	Final bool
 }
 
 type ReasoningSummary struct {
 	At   time.Time
+	Turn int
 	Text string
 }
 
@@ -92,6 +124,8 @@ type RunFinished struct {
 
 func (e RunStarted) OccurredAt() time.Time       { return e.At }
 func (e PreflightWarning) OccurredAt() time.Time { return e.At }
+func (e UserMessage) OccurredAt() time.Time      { return e.At }
+func (e ControlInput) OccurredAt() time.Time     { return e.At }
 func (e TurnStarted) OccurredAt() time.Time      { return e.At }
 func (e ModelResponded) OccurredAt() time.Time   { return e.At }
 func (e ToolCalled) OccurredAt() time.Time       { return e.At }

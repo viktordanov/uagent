@@ -128,13 +128,13 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 | --- | --- |
 | 0 | The run finished and the runner reported no error |
 | 1 | The run failed (the runner exited non-zero, reported an error, or the model failed), or uagent hit an unexpected error |
-| 2 | Invalid usage, or a preflight check blocked the run |
+| 2 | Invalid usage, a preflight check blocked the run, or another run holds the session |
 | 3 | The disk limit stopped the run |
 | 124 | The timeout stopped the run |
 | 130 | The run was interrupted |
 <!-- /memoria:section -->
 
-<!-- memoria:section id="contract" files="harness/preflight.go harness/process.go harness/state.go" -->
+<!-- memoria:section id="contract" files="harness/preflight.go harness/process.go harness/lock.go harness/state.go" -->
 ## What uagent adds
 
 ### Safety guards
@@ -143,7 +143,8 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 | --- | --- |
 | Sessions stored in the workspace can be read back by the agent's own background searches and grow without limit (unreal-agent issue #3). | Sessions, logs, and run records live in `~/.local/state/unreal-agent`. A state directory inside the workspace is refused. `--max-disk` (default 5G) stops a run whose tool output grows past the limit. |
 | The workspace `.env` is loaded and can redirect the model endpoint or credentials (issue #5). | A `.env` that sets `UNREAL_HARNESS_*`, `OPENAI_CODEX_*`, `CODEX_HOME`, or `*_PROXY` blocks the run unless `--allow-dotenv` is given. Provider, model, and base URL are always set explicitly for the runner, so a `.env` cannot override them. |
-| No overall time limit, and background tools can outlive a run. | `--timeout` (default 30m) stops the runner and every background tool process group, first with SIGTERM and then SIGKILL. Tools still running after the runner exits on its own are killed too. |
+| No overall time limit, and background tools can outlive a run. | `--timeout` (default 30m) and Ctrl+C stop the runner gracefully: SIGINT first, so it records its state, then SIGTERM and SIGKILL if it does not stop within 5 s. Tools and processes still running after the runner exits, for any reason, are killed. |
+| Session files have no lock, so two runs on one session corrupt it. | Each run holds a lock on its session (`sessions/<id>.lock`). A second run on the same `--session` fails at once with exit code 2. |
 | Codex tokens are never refreshed. | An expired token stops the run before it starts; a token that expires within an hour produces a warning. |
 
 ### Ergonomics
@@ -154,13 +155,17 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 - Statistics for comparing the runner with other agents: wall time, model time, tool busy time, tool time that overlapped model time, turns, tool calls and failures, parallelism, and tokens.
 <!-- /memoria:section -->
 
-<!-- memoria:section id="library" files="core/run.go core/event.go core/stats.go core/finding.go harness/harness.go harness/state.go harness/decode.go" -->
+<!-- memoria:section id="library" files="core/run.go core/event.go core/stats.go core/finding.go harness/harness.go harness/run.go harness/lock.go harness/state.go harness/decode.go" -->
 ## Use it from Go
 
 The CLI is a thin layer over two packages, and a TUI or another tool can use them directly:
 
 - `core` is the pure model: `Request`, `Result`, the run events, `StatsCollector`, and the rules for findings and outcomes. It does no I/O.
-- `harness` runs the runner with every guard. `New(Config)` returns a `Harness`; `Run(ctx, request, sink)` streams events to `sink` and returns the `Result`. `Preflight` checks a request without running it, `History` lists saved runs, and `Load` reopens one.
+- `harness` runs the runner with every guard. `New(Config)` returns a `Harness`:
+  - `Run(ctx, request, sink)` streams events to `sink` and returns the `Result`. `Start` does the same but returns a `Run` handle at once, with `Wait`, `Interrupt` (graceful), `Kill`, and `Done`.
+  - A request carries either a `Prompt` or `Messages`, each with an ID. The runner echoes every message as a `UserMessage` event with the same ID, which confirms delivery.
+  - `Preflight` checks a request without running it. `LockSession` is the per-session lock every run takes.
+  - `Runs` lists every run record, including runs in progress; `History` lists finished runs; `LoadRequest`, `LoadEvents`, and `Load` reopen one.
 
 ```go
 h := harness.New(harness.Config{RunnerPath: runner, StateDir: harness.DefaultStateDir()})
@@ -168,7 +173,7 @@ result, err := h.Run(ctx, core.Request{Prompt: "Summarize this project.", Provid
 	Model: "gpt-6-sol", Effort: "high", Workspace: dir}, func(e core.Event) { /* update the UI */ })
 ```
 
-`Run` sends `RunStarted` first and `RunFinished` last for every run that starts, and it is safe to call concurrently.
+`Run` and `Start` send `RunStarted` first and `RunFinished` last for every run that starts, and they are safe to call concurrently for different sessions.
 Programs in other languages use the stream instead:
 
 <!-- memoria:import src="stream/README.md#summary" -->

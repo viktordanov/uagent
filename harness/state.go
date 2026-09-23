@@ -64,8 +64,18 @@ func (l layout) saveSummary(result core.Result) error {
 	return nil
 }
 
-// History lists saved runs, newest first. Runs without a readable summary are skipped.
-func (h *Harness) History() ([]core.Result, error) {
+// RunRecord is one run directory. Result comes from summary.json; Complete
+// is false while the run is still going, or when uagent stopped before the
+// run ended.
+type RunRecord struct {
+	Dir      string
+	Result   core.Result
+	Complete bool
+}
+
+// Runs lists every run with a readable summary, newest first, including runs
+// that have not finished.
+func (h *Harness) Runs() ([]RunRecord, error) {
 	entries, err := os.ReadDir(h.layout.runsDir())
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
@@ -73,20 +83,65 @@ func (h *Harness) History() ([]core.Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to list runs: %w", err)
 	}
-	var results []core.Result
+	var records []RunRecord
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		result, found, err := loadSummary(h.layout.runDir(e.Name()))
+		dir := h.layout.runDir(e.Name())
+		result, found, err := loadSummary(dir)
 		if err != nil || !found {
 			continue
 		}
-		results = append(results, result)
+		records = append(records, RunRecord{Dir: dir, Result: result, Complete: result.Status != core.StatusRunning})
 	}
-	slices.SortFunc(results, func(a, b core.Result) int { return b.StartedAt.Compare(a.StartedAt) })
+	slices.SortFunc(records, func(a, b RunRecord) int { return b.Result.StartedAt.Compare(a.Result.StartedAt) })
+
+	return records, nil
+}
+
+// History lists finished runs, newest first.
+func (h *Harness) History() ([]core.Result, error) {
+	records, err := h.Runs()
+	if err != nil {
+		return nil, err
+	}
+	var results []core.Result
+	for _, r := range records {
+		if r.Complete {
+			results = append(results, r.Result)
+		}
+	}
 
 	return results, nil
+}
+
+// LoadRequest reads the request a run sent to the runner (request.json): the
+// prompt or messages, model, effort, session ID, and runner options.
+func LoadRequest(runDir string) (core.Request, error) {
+	data, err := os.ReadFile(filepath.Join(runDir, RequestFile))
+	if err != nil {
+		return core.Request{}, fmt.Errorf("failed to read request: %w", err)
+	}
+	var dto requestDTO
+	if err := json.Unmarshal(data, &dto); err != nil {
+		return core.Request{}, fmt.Errorf("failed to decode request: %w", err)
+	}
+	req := requestFromDTO(dto)
+	req.RunID = filepath.Base(runDir)
+
+	return req, nil
+}
+
+// LoadEvents decodes a run's saved runner output (events.jsonl) into sink.
+func LoadEvents(runDir string, sink core.Sink) error {
+	f, err := os.Open(filepath.Join(runDir, EventsFile))
+	if err != nil {
+		return fmt.Errorf("failed to open events: %w", err)
+	}
+	defer f.Close()
+
+	return ReadEvents(f, sink)
 }
 
 // RunDir returns the directory of a run.

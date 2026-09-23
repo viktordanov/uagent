@@ -33,6 +33,7 @@ type Stats struct {
 	ToolBusyTime     time.Duration
 	ToolModelOverlap time.Duration
 	Turns            int
+	UserMessages     int
 	ModelResponses   int
 	ToolCalls        int
 	FailedToolCalls  int
@@ -125,6 +126,11 @@ func (c *StatsCollector) Add(event Event) {
 		if e.Final {
 			c.answer = e.Text
 		}
+	case UserMessage:
+		c.observe(e.At)
+		c.stats.UserMessages++
+	case ControlInput:
+		c.observe(e.At)
 	case RunnerError:
 		c.stats.Errors = append(c.stats.Errors, e.Message)
 	case PreflightWarning:

@@ -40,6 +40,7 @@ Add a fixture only from real runner output, and remove local paths and credentia
 | `FAKERUNNER_EXIT` | Exit code after the replay |
 | `FAKERUNNER_HANG` | `1` starts background tools and waits to be killed; `orphan` starts them and exits |
 | `FAKERUNNER_CAPTURE` | A directory that receives `stdin.json`, `env.txt`, and the pids of started tools |
+| `FAKERUNNER_ECHO` | `1` first writes an input item for each request message, the way the runner acknowledges delivery |
 
 The background tools are one child in the runner's process group and one in its own group, recorded in the session file the way the real runner records operations.
 That lets the tests prove that timeouts, interrupts, and runner exits leave no process behind.
@@ -63,5 +64,5 @@ A change to decoding, statistics, or the stream format shows up as a golden diff
 ## Where each layer is tested
 
 - `core` has plain unit tests for statistics, outcome classification, and finding triage.
-- `harness` runs the fake runner through the real process code: golden streams, run records, pinned environment, failures, timeouts, interrupts, orphaned tools, preflight, and history. It also decodes the simple, parallel, and timeout captures directly.
+- `harness` runs the fake runner through the real process code: golden streams, run records, pinned environment, failures, timeouts, interrupts and kills through the run handle, orphaned tools, the session lock, messages with IDs, preflight, and history including runs in progress. It also decodes the simple, parallel, and timeout captures directly, including user messages, control inputs, and turn IDs.
 - `cmd/uagent` builds the CLI and checks stdout, stderr, and exit codes for each output mode.

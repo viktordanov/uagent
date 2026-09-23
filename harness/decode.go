@@ -23,6 +23,7 @@ type opInfo struct {
 type Decoder struct {
 	turns     int
 	turnStart time.Time
+	turnIDs   map[string]int
 	calls     map[string]callInfo
 	ops       map[string]*opInfo
 	failed    map[string]bool
@@ -30,9 +31,10 @@ type Decoder struct {
 
 func NewDecoder() *Decoder {
 	return &Decoder{
-		calls:  map[string]callInfo{},
-		ops:    map[string]*opInfo{},
-		failed: map[string]bool{},
+		turnIDs: map[string]int{},
+		calls:   map[string]callInfo{},
+		ops:     map[string]*opInfo{},
+		failed:  map[string]bool{},
 	}
 }
 
@@ -49,11 +51,18 @@ func (d *Decoder) Decode(line []byte) []core.Event {
 		return []core.Event{core.RunnerError{At: time.Now(), Message: item.Message}}
 	}
 	switch item.Kind {
+	case "input":
+		return decodeInput(item)
 	case "turn":
+		var turn turnDTO
+		_ = json.Unmarshal(item.Data, &turn) // a missing ID leaves TurnID empty
 		d.turns++
 		d.turnStart = item.RecordedAt
+		if turn.ID != "" {
+			d.turnIDs[turn.ID] = d.turns
+		}
 
-		return []core.Event{core.TurnStarted{At: item.RecordedAt, Turn: d.turns}}
+		return []core.Event{core.TurnStarted{At: item.RecordedAt, Turn: d.turns, TurnID: turn.ID}}
 	case "model_response":
 		return d.decodeResponse(item)
 	case "tool_call_status":
@@ -69,7 +78,11 @@ func (d *Decoder) decodeResponse(item itemDTO) []core.Event {
 		return []core.Event{core.RunnerError{At: item.RecordedAt, Message: fmt.Sprintf("failed to decode model_response: %v", err)}}
 	}
 	resp := dto.Response
-	responded := core.ModelResponded{At: item.RecordedAt, Turn: d.turns, Usage: resp.Usage.toCore(), Stop: resp.Stop}
+	turn := d.turns
+	if n, ok := d.turnIDs[dto.TurnID]; ok {
+		turn = n
+	}
+	responded := core.ModelResponded{At: item.RecordedAt, Turn: turn, TurnID: dto.TurnID, Usage: resp.Usage.toCore(), Stop: resp.Stop}
 	if !d.turnStart.IsZero() {
 		responded.Duration = item.RecordedAt.Sub(d.turnStart)
 	}
@@ -86,20 +99,22 @@ func (d *Decoder) decodeResponse(item itemDTO) []core.Event {
 			}
 			info := callInfo{name: c.Name, label: describeCall(c)}
 			d.calls[c.CallID] = info
-			events = append(events, core.ToolCalled{At: item.RecordedAt, CallID: c.CallID, Name: info.name, Label: info.label})
+			events = append(events, core.ToolCalled{
+				At: item.RecordedAt, CallID: c.CallID, Name: info.name, Label: info.label, Arguments: c.Arguments,
+			})
 		case "message":
 			var m messageDTO
 			if json.Unmarshal(out.Data, &m) != nil || m.Role != "assistant" {
 				continue
 			}
-			events = append(events, core.AssistantMessage{At: item.RecordedAt, Text: m.Text, Final: m.Phase == "final_answer"})
+			events = append(events, core.AssistantMessage{At: item.RecordedAt, Turn: turn, Text: m.Text, Final: m.Phase == "final_answer"})
 		case "reasoning":
 			var r reasoningDTO
 			if json.Unmarshal(out.Data, &r) != nil {
 				continue
 			}
 			for _, s := range r.Summary {
-				events = append(events, core.ReasoningSummary{At: item.RecordedAt, Text: s})
+				events = append(events, core.ReasoningSummary{At: item.RecordedAt, Turn: turn, Text: s})
 			}
 		}
 	}
@@ -122,11 +137,15 @@ func (d *Decoder) decodeToolStatus(item itemDTO) []core.Event {
 		})
 	}
 	for _, op := range dto.Operations {
+		outPath, errPath := shellPaths(op)
 		info, seen := d.ops[op.ID]
 		if !seen {
 			info = &opInfo{start: item.RecordedAt}
 			d.ops[op.ID] = info
-			events = append(events, core.ToolStarted{At: item.RecordedAt, CallID: dto.CallID, OpID: op.ID, Name: call.name, Label: call.label})
+			events = append(events, core.ToolStarted{
+				At: item.RecordedAt, CallID: dto.CallID, OpID: op.ID, Name: call.name, Label: call.label,
+				OpType: op.Type, OutPath: outPath, ErrPath: errPath,
+			})
 		}
 		if info.done || !isTerminal(op.Status) {
 			continue
@@ -136,10 +155,53 @@ func (d *Decoder) decodeToolStatus(item itemDTO) []core.Event {
 		events = append(events, core.ToolFinished{
 			At: item.RecordedAt, CallID: dto.CallID, OpID: op.ID, Name: call.name, Label: call.label,
 			OK: ok, Detail: detail, Duration: item.RecordedAt.Sub(info.start),
+			OpType: op.Type, OutPath: outPath, ErrPath: errPath,
 		})
 	}
 
 	return events
+}
+
+// decodeInput turns a persisted inbox input into a UserMessage or ControlInput.
+func decodeInput(item itemDTO) []core.Event {
+	var in inputDTO
+	if err := json.Unmarshal(item.Data, &in); err != nil {
+		return []core.Event{core.RunnerError{At: item.RecordedAt, Message: fmt.Sprintf("failed to decode input: %v", err)}}
+	}
+	switch in.Kind {
+	case "external":
+		var text string
+		if err := json.Unmarshal(in.Payload, &text); err != nil {
+			text = string(in.Payload)
+		}
+
+		return []core.Event{core.UserMessage{At: item.RecordedAt, ID: in.ID, Text: text}}
+	case "control":
+		var c controlDTO
+		if err := json.Unmarshal(in.Payload, &c); err != nil {
+			return []core.Event{core.RunnerError{At: item.RecordedAt, Message: fmt.Sprintf("failed to decode control input: %v", err)}}
+		}
+
+		return []core.Event{core.ControlInput{
+			At: item.RecordedAt, ID: in.ID, Mode: c.Mode, Effort: c.Parameters.ReasoningEffort, Reason: c.Reason,
+		}}
+	}
+
+	return nil
+}
+
+// shellPaths returns a shell operation's output files. The runner reports
+// them once the operation has output; they are empty before that.
+func shellPaths(op operationDTO) (outPath, errPath string) {
+	if op.Type != "shell" {
+		return "", ""
+	}
+	var s shellStateDTO
+	if json.Unmarshal(op.State, &s) != nil {
+		return "", ""
+	}
+
+	return s.OutPath, s.ErrPath
 }
 
 func operationOutcome(op operationDTO) (ok bool, detail string) {

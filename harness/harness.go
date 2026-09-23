@@ -1,6 +1,7 @@
 // Package harness runs unreal-agent-runner with uagent's guards: preflight
-// checks, a pinned environment, process-group supervision, a disk limit, and
-// run records in the state directory. The CLI and the TUI both call it.
+// checks, a session lock, a pinned environment, process-group supervision, a
+// disk limit, and run records in the state directory. The CLI and the TUI both
+// call it.
 package harness
 
 import (
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,7 +39,7 @@ type Config struct {
 	StateDir string
 	// MaxDisk kills a run when its tool output exceeds this many bytes (0 disables).
 	MaxDisk int64
-	// KillGrace is the wait between SIGTERM and SIGKILL (default 5s).
+	// KillGrace is how long a stopping runner gets before it is killed (default 5s).
 	KillGrace time.Duration
 	// Logger receives diagnostics (default slog.Default()).
 	Logger *slog.Logger
@@ -66,20 +68,36 @@ func New(cfg Config) *Harness {
 	return &Harness{cfg: cfg, layout: layout{root: cfg.StateDir}, log: cfg.Logger.WithGroup("harness")}
 }
 
-// Run executes one task: preflight, runner, statistics, and summary.json.
-//
-// It returns an error wrapping ErrPreflightBlocked when preflight blocks the
-// run, and an error when the runner cannot start or the summary cannot be
-// saved. A run that started always produces a Result whose Status says how it
-// ended, and sink always receives RunStarted first and RunFinished last.
+// Run executes one task and waits for it: Start followed by Wait.
 func (h *Harness) Run(ctx context.Context, req core.Request, sink core.Sink) (core.Result, error) {
-	findings, err := h.Preflight(req)
+	run, err := h.Start(ctx, req, sink)
 	if err != nil {
 		return core.Result{}, err
 	}
+
+	return run.Wait()
+}
+
+// Start checks the request, takes the session lock, starts the runner, and
+// returns once it is running.
+//
+// It returns an error wrapping ErrPreflightBlocked when preflight blocks the
+// run, ErrSessionBusy when another run holds the session, and an error when
+// the request is invalid or the runner cannot start. Once Start succeeds, sink
+// receives RunStarted first and RunFinished last, and Wait returns a Result
+// whose Status says how the run ended.
+func (h *Harness) Start(ctx context.Context, req core.Request, sink core.Sink) (*Run, error) {
+	req, err := normalizeRequest(req)
+	if err != nil {
+		return nil, err
+	}
+	findings, err := h.Preflight(req)
+	if err != nil {
+		return nil, err
+	}
 	blocking, warnings := core.Triage(findings, req.AllowDotenv)
 	if len(blocking) > 0 {
-		return core.Result{}, fmt.Errorf("%w: %s", ErrPreflightBlocked, core.Messages(blocking))
+		return nil, fmt.Errorf("%w: %s", ErrPreflightBlocked, core.Messages(blocking))
 	}
 
 	started := time.Now()
@@ -89,46 +107,68 @@ func (h *Harness) Run(ctx context.Context, req core.Request, sink core.Sink) (co
 	if req.RunID == "" {
 		req.RunID = core.NewRunID(started, req.SessionID)
 	}
-	collector := core.NewStatsCollector()
-	emit := func(e core.Event) {
-		collector.Add(e)
-		sink(e)
-	}
-	emit(core.RunStarted{
-		At: started, RunID: req.RunID, SessionID: req.SessionID,
-		Provider: req.Provider, Model: req.Model, Effort: req.Effort, Workspace: req.Workspace,
-	})
-	for _, w := range warnings {
-		emit(core.PreflightWarning{At: started, Code: w.Code, Message: w.Message})
+	unlock, err := LockSession(h.cfg.StateDir, req.SessionID)
+	if err != nil {
+		return nil, err
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 	if req.Timeout > 0 {
 		runCtx, cancel = context.WithTimeoutCause(ctx, req.Timeout, errTimedOut)
 	}
-	defer cancel()
-	exit, err := h.runProcess(runCtx, req, emit)
+	r := &Run{
+		h: h, req: req, started: started, sink: sink, collector: core.NewStatsCollector(),
+		ctx: runCtx, cancel: cancel, unlock: unlock,
+		interrupt: make(chan struct{}), kill: make(chan struct{}), done: make(chan struct{}),
+	}
+	r.emit(core.RunStarted{
+		At: started, RunID: req.RunID, SessionID: req.SessionID,
+		Provider: req.Provider, Model: req.Model, Effort: req.Effort, Workspace: req.Workspace,
+	})
+	for _, w := range warnings {
+		r.emit(core.PreflightWarning{At: started, Code: w.Code, Message: w.Message})
+	}
+
+	proc, err := h.startProcess(runCtx, req, started, r.emit)
 	if err != nil {
-		return core.Result{}, err
-	}
-	collector.Close(exit.endedAt)
+		cancel()
+		if uerr := unlock(); uerr != nil {
+			err = errors.Join(err, uerr)
+		}
 
-	result := core.Result{
-		Request:        req,
-		Status:         core.Classify(exit.termination, exit.code, collector.HasError()),
-		RunnerExitCode: exit.code,
-		StartedAt:      started,
-		Wall:           exit.endedAt.Sub(started),
-		Stats:          collector.Stats(),
-		Answer:         collector.Answer(),
+		return nil, err
 	}
-	saveErr := h.layout.saveSummary(result)
-	sink(core.RunFinished{At: exit.endedAt, Result: result})
-	if saveErr != nil {
-		return result, saveErr
+	r.proc = proc
+	go r.supervise()
+
+	return r, nil
+}
+
+// normalizeRequest checks that exactly one of Prompt and Messages is set and
+// gives every message an ID.
+func normalizeRequest(req core.Request) (core.Request, error) {
+	hasPrompt := strings.TrimSpace(req.Prompt) != ""
+	switch {
+	case hasPrompt && len(req.Messages) > 0:
+		return req, errors.New("failed to start run: set either a prompt or messages, not both")
+	case !hasPrompt && len(req.Messages) == 0:
+		return req, errors.New("failed to start run: the request has no prompt or messages")
+	}
+	messages := make([]core.UserInput, len(req.Messages))
+	for i, m := range req.Messages {
+		if strings.TrimSpace(m.Text) == "" {
+			return req, fmt.Errorf("failed to start run: message %d is empty", i+1)
+		}
+		if m.ID == "" {
+			m.ID = uuid.NewString()
+		}
+		messages[i] = m
+	}
+	if len(messages) > 0 {
+		req.Messages = messages
 	}
 
-	return result, nil
+	return req, nil
 }
 
 // Preflight checks the workspace, state directory, workspace .env, and
