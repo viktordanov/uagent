@@ -17,6 +17,7 @@ const (
 	// FindingDotenvRisky marks a workspace .env that can redirect the model
 	// endpoint or credentials. Request.AllowDotenv downgrades it to a warning.
 	FindingDotenvRisky  = "dotenv_risky"
+	FindingModelMissing = "model_missing"
 	FindingAuthMissing  = "auth_missing"
 	FindingAuthExpired  = "auth_expired"
 	FindingAuthExpiring = "auth_expiring"

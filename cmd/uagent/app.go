@@ -45,6 +45,7 @@ func newApp() *cli.Command {
 		ExitErrHandler: func(context.Context, *cli.Command, error) {},
 		OnUsageError:   onUsageError,
 		Flags:          runFlags(),
+		// Flags in a mutually exclusive group are registered by the group itself.
 		MutuallyExclusiveFlags: []cli.MutuallyExclusiveFlags{
 			{Flags: [][]cli.Flag{{jsonFlag}, {streamFlag}}},
 		},
@@ -111,8 +112,6 @@ func runFlags() []cli.Flag {
 		},
 		&cli.IntFlag{Name: "max-attempts", Usage: "LLM retry attempts (0 uses the runner default)"},
 		&cli.StringSliceFlag{Name: "disallow", Usage: "tool name to disable, e.g. ViewImage (repeatable)"},
-		jsonFlag,
-		streamFlag,
 		&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Usage: "no progress output, summary only"},
 		&cli.BoolFlag{Name: "verbose", Usage: "also show reasoning summaries"},
 		&cli.BoolFlag{Name: "allow-dotenv", Usage: "run even if the workspace .env sets UNREAL_HARNESS_*, proxy, or Codex auth variables"},

@@ -139,6 +139,25 @@ func TestPreflight(t *testing.T) {
 		assert.Empty(t, h.check(t, "ollama"))
 	})
 
+	t.Run("a provider without a default model needs --model", func(t *testing.T) {
+		h := newPreflightEnv(t)
+		h.env["OPENROUTER_API_KEY"] = "sk-or"
+		h.env["OPENAI_API_KEY"] = "sk-test"
+		noModel := func(provider string) []string {
+			req := fixtures.RequestWith(func(r *core.Request) {
+				r.Workspace, r.Provider, r.Model = h.workspace, provider, ""
+			})
+			findings, err := h.h.Preflight(req)
+			require.NoError(t, err)
+
+			return codes(findings)
+		}
+
+		assert.Equal(t, []string{core.FindingModelMissing}, noModel("openrouter"))
+		assert.Equal(t, []string{core.FindingModelMissing}, noModel("ollama"))
+		assert.Empty(t, noModel("openai"), "the runner defaults openai to gpt-6-astra")
+	})
+
 	t.Run("api key from the environment satisfies keyed providers", func(t *testing.T) {
 		h := newPreflightEnv(t)
 		h.env["OPENAI_API_KEY"] = "sk-test"

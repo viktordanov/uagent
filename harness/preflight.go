@@ -46,6 +46,12 @@ func (c *checker) check(req core.Request) ([]core.Finding, error) {
 			"workspace .env sets %s, which can redirect the model endpoint or credentials (override with --allow-dotenv)",
 			strings.Join(risky, ", "))))
 	}
+	// Only the openai provider has a default model in the runner; the others
+	// would fail after starting with "model must be set".
+	if req.Model == "" && req.Provider != "openai" {
+		findings = append(findings, blocking(core.FindingModelMissing,
+			fmt.Sprintf("provider %s has no default model; pass --model", req.Provider)))
+	}
 	auth, err := c.checkAuth(req.Provider)
 	if err != nil {
 		return nil, err

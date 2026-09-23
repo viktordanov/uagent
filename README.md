@@ -8,9 +8,10 @@ uagent is a wrapper around unreal-agent-runner that adds safety guards and every
 1. [Why a wrapper](#why-a-wrapper)
 2. [Install](#install)
 3. [Run a task](#run-a-task)
-4. [What uagent adds](#what-uagent-adds)
-5. [Use it from Go](#use-it-from-go)
-6. [Development](#development)
+4. [CLI reference](#cli-reference)
+5. [What uagent adds](#what-uagent-adds)
+6. [Use it from Go](#use-it-from-go)
+7. [Development](#development)
 
 ## Why a wrapper
 
@@ -22,7 +23,7 @@ uagent keeps the runner itself unchanged: the same request fields reach it on st
 What uagent adds sits around the runner: guards before and during the run, readable progress, a plain answer on stdout, and a record of every run.
 <!-- /memoria:section -->
 
-<!-- memoria:section id="usage" files="go.mod cmd/uagent/app.go" -->
+<!-- memoria:section id="usage" files="go.mod cmd/uagent/app.go cmd/uagent/main.go harness/preflight.go" -->
 ## Install
 
 ```sh
@@ -42,17 +43,84 @@ uagent --stream "..."                       # JSONL events for another program
 uagent stats ~/.local/state/unreal-agent/runs/<run-id>
 ```
 
-The default provider is `openai-codex` with `gpt-6-sol`. Flags can come before or after the prompt, and `uagent --help` lists them all.
-`--provider`, `--model`, and `--base-url` also read the runner's own `UNREAL_HARNESS_LLM_*` variables.
+The prompt comes from the arguments, or from stdin when there are none or the only argument is `-`.
+Flags can come before or after the prompt.
 
-| Output mode | Stdout | Stderr |
+## CLI reference
+
+`uagent [flags] <prompt>` runs one task. `uagent stats [--json] <run-dir|events.jsonl>` recomputes the summary of a saved run.
+
+### Choose a backend and model
+
+| Flag | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `--provider` | `openai-codex` | `UNREAL_HARNESS_LLM_PROVIDER` | How the runner authenticates and which endpoint it calls by default |
+| `-m`, `--model` | `gpt-6-sol` for `openai-codex`, `gpt-6-astra` for `openai` | `UNREAL_HARNESS_LLM_MODEL` | The provider's model ID, passed through unchanged |
+| `-e`, `--effort` | `high` | | Thinking level: `low`, `medium`, `high`, `xhigh`, or `max` |
+| `--base-url` | the provider's endpoint | `UNREAL_HARNESS_LLM_BASE_URL` | Send requests to another server |
+| `--max-attempts` | the runner's default (5) | | Retries for failed model requests; 1 disables retries |
+| `--system-prompt` | the runner's prompt | | Replace the runner's system prompt |
+| `--disallow` | | | A tool the model may not use (`Bash`, `ViewImage`, or `SkillUse`); repeat for more |
+
+Every provider speaks the OpenAI Responses API and posts to `<base URL>/responses`. The provider decides the credentials and the default endpoint:
+
+| Provider | Credentials | Default endpoint | Default model |
+| --- | --- | --- | --- |
+| `openai-codex` | `codex login` (`~/.codex/auth.json` or `$CODEX_HOME/auth.json`), or `OPENAI_CODEX_ACCESS_TOKEN` | `https://chatgpt.com/backend-api/codex` | none; uagent uses `gpt-6-sol` |
+| `openai` | `OPENAI_API_KEY` | `https://api.openai.com/v1` | `gpt-6-astra` |
+| `openrouter` | `OPENROUTER_API_KEY` | `https://openrouter.ai/api/v1` | none; pass `--model` |
+| `fireworks` | `FIREWORKS_API_KEY` | `https://api.fireworks.ai/inference/v1` | none; pass `--model` |
+| `ollama` | none | `http://localhost:11434/v1` | none; pass `--model` |
+
+`UNREAL_HARNESS_LLM_API_KEY` works for every keyed provider. uagent checks credentials and the model before starting, so a missing key or model fails immediately with exit code 2.
+
+```sh
+uagent "..."                                                       # Codex subscription, gpt-6-sol
+uagent --provider openai "..."                                     # OpenAI API key, gpt-6-astra
+uagent --provider openrouter -m <vendor>/<model> "..."             # any OpenRouter model ID
+uagent --provider fireworks -m accounts/fireworks/models/<model> "..."
+uagent --provider ollama -m <model> "..."                          # a model pulled into local Ollama
+uagent --provider ollama --base-url http://gpu-box:11434/v1 -m <model> "..."
+uagent --provider openai --base-url http://localhost:8000/v1 -m <model> "..."  # any Responses-compatible server
+```
+
+The `openai` provider always needs `OPENAI_API_KEY` or `UNREAL_HARNESS_LLM_API_KEY`; for a local server that ignores keys, any value works.
+
+To make a backend the default, export the variables, for example `export UNREAL_HARNESS_LLM_PROVIDER=openrouter UNREAL_HARNESS_LLM_MODEL=<vendor>/<model>`.
+Flags win over the environment. uagent always passes the provider, model, and base URL to the runner explicitly, so a workspace `.env` cannot change them.
+
+### Guards and limits
+
+| Flag | Default | Environment | Meaning |
+| --- | --- | --- | --- |
+| `-C`, `--workspace` | `.` | | The agent's workspace and Bash working directory |
+| `-t`, `--timeout` | `30m` | | Stop the run and all its tools after this long; `0` disables |
+| `--max-disk` | `5G` | | Stop the run when tool output passes this size (`500M`, `2G`); `0` disables |
+| `--allow-dotenv` | off | | Run even when the workspace `.env` sets risky variables, with a warning |
+| `--state-dir` | `~/.local/state/unreal-agent` | `UAGENT_STATE_DIR` | Sessions, logs, and run records; must be outside the workspace |
+| `--runner` | `~/.local/bin`, then `PATH` | `UAGENT_RUNNER` | The unreal-agent-runner executable |
+| `--session` | a new UUID | | Create or resume a named runner session |
+
+### Output
+
+| Flag | Stdout | Stderr |
 | --- | --- | --- |
-| default | the final answer | progress, then a summary |
-| `-q` | the final answer | the summary |
+| none | the final answer | progress, then a summary |
+| `-q`, `--quiet` | the final answer | the summary |
 | `--json` | the summary with the answer, as JSON | progress, then the summary |
 | `--stream` | versioned JSONL events | diagnostics only |
 
-Exit codes: 0 ok, 1 failed, 2 usage or preflight, 3 disk limit, 124 timeout, 130 interrupted.
+`--verbose` adds the model's reasoning summaries to the progress, and `--log-level debug|info|warn|error` (default `warn`) controls diagnostic logs on stderr.
+`--json` and `--stream` cannot be combined. `-v` prints the version.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | The run finished and the runner reported no error |
+| 1 | The run failed (the runner exited non-zero, reported an error, or the model failed), or uagent hit an unexpected error |
+| 2 | Invalid usage, or a preflight check blocked the run |
+| 3 | The disk limit stopped the run |
+| 124 | The timeout stopped the run |
+| 130 | The run was interrupted |
 <!-- /memoria:section -->
 
 <!-- memoria:section id="contract" files="harness/preflight.go harness/process.go harness/state.go" -->
