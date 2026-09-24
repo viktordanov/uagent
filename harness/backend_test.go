@@ -2,9 +2,12 @@ package harness_test
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -120,4 +123,34 @@ func TestRunnerBackend_Env(t *testing.T) {
 	env, err := os.ReadFile(filepath.Join(e.capture, "env.txt"))
 	require.NoError(t, err)
 	assert.Contains(t, string(env), "SHELL=/custom/shell")
+}
+
+// TestStart_KillsToolsLeftByACrash: a session file that still records a live
+// tool (its run was killed before cleaning up) gets that tool's process
+// group killed when the next run of the session starts.
+func TestStart_KillsToolsLeftByACrash(t *testing.T) {
+	e := newTestEnv(t, "simple.jsonl")
+	sleeper := exec.Command("/bin/sleep", "30")
+	sleeper.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, sleeper.Start())
+	done := make(chan error, 1)
+	go func() { done <- sleeper.Wait() }()
+	t.Cleanup(func() { _ = syscall.Kill(-sleeper.Process.Pid, syscall.SIGKILL) })
+
+	id := "3f2a1b2c-0000-4000-8000-00000000c0de"
+	sessions := filepath.Join(e.stateDir, "sessions")
+	require.NoError(t, os.MkdirAll(sessions, 0o700))
+	record := fmt.Sprintf(`{"type":"operation","data":{"Operation":{"ID":"op-1","Status":"running","State":{"ProcessGroupID":%d}}}}`+"\n", sleeper.Process.Pid)
+	require.NoError(t, os.WriteFile(filepath.Join(sessions, id+".session.jsonl"), []byte(record), 0o600))
+
+	// The new run hangs, so only Start (not the end of a run) can kill it.
+	t.Setenv("FAKERUNNER_HANG", "1")
+	run, err := e.h.Start(context.Background(), e.request(func(r *core.Request) { r.SessionID = id }), func(core.Event) {})
+	require.NoError(t, err)
+	defer func() { run.Kill(); _, _ = run.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the orphaned tool is still running while the new run is live")
+	}
 }

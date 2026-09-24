@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -116,6 +117,15 @@ func (h *Harness) Start(ctx context.Context, req core.Request, sink core.Sink) (
 	unlock, err := LockSession(h.cfg.StateDir, req.SessionID)
 	if err != nil {
 		return nil, err
+	}
+	// A run that ended without cleaning up (uagent or uah was killed) leaves
+	// its tools running and recorded as live. The lock means no run owns
+	// them now, and the runner would only mark them failed on resume.
+	if orphans := liveOperationGroups(h.layout.sessionFile(req.SessionID)); len(orphans) > 0 {
+		h.log.LogAttrs(ctx, slog.LevelInfo, "killing tools left by an earlier run",
+			slog.String("session_id", req.SessionID),
+			slog.Int("groups", len(orphans)))
+		signalGroups(orphans, syscall.SIGKILL)
 	}
 	if req.RunID == "" {
 		// Runs of one session can start within the same second; the lock
