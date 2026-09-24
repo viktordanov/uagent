@@ -1,9 +1,21 @@
 <!-- memoria:section id="overview" files="go.mod harness/harness.go" -->
 # uagent
 
+<p>
+  <a href="https://github.com/viktordanov/uagent/actions/workflows/ci.yml"><img src="https://github.com/viktordanov/uagent/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/viktordanov/uagent/actions/workflows/memoria.yml"><img src="https://github.com/viktordanov/uagent/actions/workflows/memoria.yml/badge.svg" alt="Docs checked by Memoria"></a>
+  <a href="https://github.com/viktordanov/uagent/releases/latest"><img src="https://img.shields.io/github/v/release/viktordanov/uagent" alt="Release"></a>
+  <a href="https://pkg.go.dev/github.com/viktordanov/uagent"><img src="https://pkg.go.dev/badge/github.com/viktordanov/uagent.svg" alt="Go reference"></a>
+</p>
+
 <!-- memoria:export id="summary" -->
 uagent is a wrapper around unreal-agent-runner that adds safety guards and everyday ergonomics while staying as close to the original runner as possible.
 <!-- /memoria:export -->
+
+[uah](https://github.com/viktordanov/uagent-harness), a Codex-style TUI, is built on it.
+
+> [!NOTE]
+> The docs are kept in sync with the code by [Memoria](https://github.com/viktordanov/rs-memoria): CI fails when code changes and its README hasn't been reviewed.
 
 1. [Why a wrapper](#why-a-wrapper)
 2. [Install](#install)
