@@ -24,6 +24,7 @@ uagent is a wrapper around unreal-agent-runner that adds safety guards and every
 5. [What uagent adds](#what-uagent-adds)
 6. [Use it from Go](#use-it-from-go)
 7. [Development](#development)
+8. [License](#license)
 
 ## Why a wrapper
 
@@ -211,4 +212,10 @@ Real captured runner output, a fake runner that replays it with its original tim
 
 CI runs the build, the race-enabled tests, and golangci-lint in [ci.yml](.github/workflows/ci.yml), and `memoria check` in the Memoria-managed [memoria.yml](.github/workflows/memoria.yml).
 The [architecture notes](docs/documentation/architecture.md) explain the layout, and the [documentation guide](docs/README.md) explains how the READMEs are maintained.
+<!-- /memoria:section -->
+
+<!-- memoria:section id="license" files="LICENSE NOTICE" -->
+## License
+
+uagent is licensed under the [Apache License 2.0](LICENSE); keep the [NOTICE](NOTICE) when you redistribute it. It runs [unreal-agent-runner](https://github.com/unreallabsai/unreal-agent) (MIT) as a separate program and includes none of its code.
 <!-- /memoria:section -->
