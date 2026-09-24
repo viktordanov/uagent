@@ -16,6 +16,10 @@ import (
 type RunnerBackend struct {
 	// Path is the runner executable; see FindRunner.
 	Path string
+	// Env adds NAME=value variables to the runner's environment, after the
+	// inherited ones, so they win. The pinned provider variables still win
+	// over them.
+	Env []string
 }
 
 // Start implements Backend.
@@ -26,7 +30,7 @@ func (b RunnerBackend) Start(_ context.Context, l Launch) (Process, error) {
 		"-log-directory", l.LogsDir,
 	)
 	cmd.Dir = l.Request.Workspace
-	cmd.Env = runnerEnv(l.Request)
+	cmd.Env = runnerEnv(l.Request, b.Env)
 	cmd.Stdin = bytes.NewReader(l.RunnerRequest)
 	// Stdout is the harness's pipe; exec hands its descriptor to the runner.
 	cmd.Stdout, cmd.Stderr = l.Stdout, l.Stderr
@@ -60,14 +64,14 @@ func (p *runnerProcess) Kill()                 { signalGroups([]int{p.pgid}, sys
 // runnerEnv pins provider, model, and base URL. The runner applies workspace
 // .env values only to unset variables, so pinning them (even to "") stops a
 // workspace .env from overriding them.
-func runnerEnv(req core.Request) []string {
+func runnerEnv(req core.Request, extra []string) []string {
 	pinned := map[string]string{
 		"UNREAL_HARNESS_LLM_PROVIDER": req.Provider,
 		"UNREAL_HARNESS_LLM_MODEL":    req.Model,
 		"UNREAL_HARNESS_LLM_BASE_URL": req.BaseURL,
 	}
 	var env []string
-	for _, kv := range os.Environ() {
+	for _, kv := range append(os.Environ(), extra...) {
 		name, _, _ := strings.Cut(kv, "=")
 		if _, ok := pinned[name]; !ok {
 			env = append(env, kv)

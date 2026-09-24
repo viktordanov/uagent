@@ -101,3 +101,23 @@ func TestBackend_Interrupt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, core.StatusInterrupted, result.Status)
 }
+
+func TestRunnerBackend_Env(t *testing.T) {
+	e := newTestEnv(t, "simple.jsonl")
+	t.Setenv("FAKERUNNER_CAPTURE", e.capture)
+	h := harness.New(harness.Config{
+		Backend:  harness.RunnerBackend{Path: fakeRunner, Env: []string{"SHELL=/custom/shell"}},
+		StateDir: e.stateDir, Getenv: func(k string) string {
+			if k == "CODEX_HOME" {
+				return e.codexHome
+			}
+
+			return ""
+		},
+	})
+	_, err := h.Run(context.Background(), e.request(), func(core.Event) {})
+	require.NoError(t, err)
+	env, err := os.ReadFile(filepath.Join(e.capture, "env.txt"))
+	require.NoError(t, err)
+	assert.Contains(t, string(env), "SHELL=/custom/shell")
+}
