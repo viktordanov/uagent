@@ -3,7 +3,10 @@
 // I/O and depends only on the standard library.
 package core
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // UserInput is one user message with the ID the runner deduplicates on.
 type UserInput struct {
@@ -90,7 +93,14 @@ func Classify(termination Termination, exitCode int, reportedError bool) Status 
 	return StatusOK
 }
 
-// NewRunID names a run directory: YYYYMMDD-HHMMSS-<first 8 characters of the session ID>.
+// NewRunID names a run directory: YYYYMMDD-HHMMSS-<first 8 characters of
+// the session ID>. A leading word before a dash that is not hexadecimal,
+// such as "subagent-", is skipped, so IDs sharing it still tell runs apart.
 func NewRunID(started time.Time, sessionID string) string {
-	return started.Format("20060102-150405") + "-" + sessionID[:min(8, len(sessionID))]
+	short := sessionID
+	if word, rest, ok := strings.Cut(sessionID, "-"); ok && rest != "" && strings.Trim(strings.ToLower(word), "0123456789abcdef") != "" {
+		short = rest
+	}
+
+	return started.Format("20060102-150405") + "-" + short[:min(8, len(short))]
 }

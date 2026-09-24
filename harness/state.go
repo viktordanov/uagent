@@ -53,10 +53,14 @@ func (l layout) operationsDir(id string) string {
 // unusedRunID returns base, or base with the lowest "-N" suffix whose run
 // directory does not exist yet.
 func (l layout) unusedRunID(base string) string {
+	// Creating the directory reserves the ID, so runs of different sessions
+	// that start in the same second with the same name never share one.
+	_ = os.MkdirAll(l.runsDir(), 0o700)
 	id := base
 	for n := 2; ; n++ {
-		if _, err := os.Stat(l.runDir(id)); errors.Is(err, fs.ErrNotExist) {
-			return id
+		err := os.Mkdir(l.runDir(id), 0o700)
+		if err == nil || !errors.Is(err, fs.ErrExist) {
+			return id // an error other than "exists" shows when the run starts
 		}
 		id = fmt.Sprintf("%s-%d", base, n)
 	}

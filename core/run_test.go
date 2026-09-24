@@ -57,4 +57,5 @@ func TestNewRunID(t *testing.T) {
 
 	assert.Equal(t, "20260923-172831-2b1a9068", core.NewRunID(started, "2b1a9068-603e-48b9-bfcd-a9217088e04c"))
 	assert.Equal(t, "20260923-172831-abc", core.NewRunID(started, "abc"))
+	assert.Equal(t, "20260923-172831-4891e501", core.NewRunID(started, "subagent-4891e501-de28-460c-95e4-44c37d3d7522"))
 }

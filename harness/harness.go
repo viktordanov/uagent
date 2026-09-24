@@ -128,8 +128,8 @@ func (h *Harness) Start(ctx context.Context, req core.Request, sink core.Sink) (
 		signalGroups(orphans, syscall.SIGKILL)
 	}
 	if req.RunID == "" {
-		// Runs of one session can start within the same second; the lock
-		// makes this check and the directory creation race-free.
+		// Runs can start within the same second: unusedRunID reserves a
+		// free name by creating its directory.
 		req.RunID = h.layout.unusedRunID(core.NewRunID(started, req.SessionID))
 	}
 
