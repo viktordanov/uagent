@@ -133,7 +133,7 @@ func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}
 			return core.TerminationExited
 		case <-interrupt:
 			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping agent", slog.String("reason", "interrupt"))
-			p.stopGracefully()
+			p.stopGracefully(kill)
 
 			return core.TerminationInterrupted
 		case <-kill:
@@ -144,7 +144,7 @@ func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}
 		case <-ctx.Done():
 			cause := context.Cause(ctx)
 			p.log.LogAttrs(ctx, slog.LevelInfo, "stopping agent", slog.String("reason", cause.Error()))
-			p.stopGracefully()
+			p.stopGracefully(kill)
 			if errors.Is(cause, errTimedOut) {
 				return core.TerminationTimeout
 			}
@@ -168,18 +168,22 @@ func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}
 }
 
 // stopGracefully interrupts the agent so it can record its state and stop
-// its tools, then falls back to teardown after the grace period.
-func (p *process) stopGracefully() {
+// its tools, then falls back to teardown after the grace period, or at once
+// on a kill.
+func (p *process) stopGracefully(kill <-chan struct{}) {
 	p.agent.Interrupt()
 	select {
 	case <-p.agent.Done():
+	case <-kill:
+		p.teardown()
 	case <-time.After(p.h.cfg.KillGrace):
 		p.teardown()
 	}
 }
 
 // teardown stops the agent and every still-running background tool group:
-// SIGTERM, a grace period, then SIGKILL.
+// SIGTERM, a grace period, then SIGKILL. An agent that outlives SIGKILL by
+// another grace period is abandoned, so it cannot hold the run open.
 func (p *process) teardown() {
 	groups := liveOperationGroups(p.sessionFile)
 	p.agent.Terminate()
@@ -189,15 +193,18 @@ func (p *process) teardown() {
 	case <-time.After(p.h.cfg.KillGrace):
 		p.agent.Kill()
 		signalGroups(groups, syscall.SIGKILL)
-		<-p.agent.Done()
+		select {
+		case <-p.agent.Done():
+		case <-time.After(p.h.cfg.KillGrace):
+			p.log.Warn("agent did not stop after kill; abandoning")
+		}
 	}
 }
 
 // finish reaps anything the agent left behind, drains its output, and closes the run files.
 func (p *process) finish(ctx context.Context, termination core.Termination) processExit {
-	<-p.agent.Done()
-	// The agent is gone. Its process group and the tools it still records as
-	// running are orphans; nothing of this run may outlive it.
+	// The agent is gone, or teardown abandoned it. Its process group and the
+	// tools it still records as running are orphans; nothing of this run may outlive it.
 	if orphans := liveOperationGroups(p.sessionFile); len(orphans) > 0 {
 		p.log.LogAttrs(ctx, slog.LevelInfo, "killing orphaned tools", slog.Int("groups", len(orphans)))
 		signalGroups(orphans, syscall.SIGKILL)
@@ -212,8 +219,14 @@ func (p *process) finish(ctx context.Context, termination core.Termination) proc
 	}
 	_ = p.pipe.Close()
 	p.closeFiles()
+	code := -1 // an abandoned agent has no exit code
+	select {
+	case <-p.agent.Done():
+		code = p.agent.ExitCode()
+	default:
+	}
 
-	return processExit{code: p.agent.ExitCode(), termination: termination, endedAt: time.Now()}
+	return processExit{code: code, termination: termination, endedAt: time.Now()}
 }
 
 func (p *process) closeFiles() {

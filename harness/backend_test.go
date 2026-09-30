@@ -105,6 +105,52 @@ func TestBackend_Interrupt(t *testing.T) {
 	assert.Equal(t, core.StatusInterrupted, result.Status)
 }
 
+// stuckBackend starts an agent that writes its output and then ignores
+// every signal: Done never closes.
+type stuckBackend struct{ output []byte }
+
+func (b stuckBackend) Start(_ context.Context, l harness.Launch) (harness.Process, error) {
+	_, _ = l.Stdout.Write(b.output)
+	_ = l.Stdout.Close()
+
+	return stuckProcess{}, nil
+}
+
+type stuckProcess struct{}
+
+func (stuckProcess) Done() <-chan struct{} { return nil }
+func (stuckProcess) ExitCode() int         { panic("ExitCode before Done") }
+func (stuckProcess) Interrupt()            {}
+func (stuckProcess) Terminate()            {}
+func (stuckProcess) Kill()                 {}
+
+// TestBackend_KillDuringInterruptIsBounded: a kill cuts a graceful stop
+// short, and an agent that outlives the kill is abandoned after the grace
+// period instead of holding the run open.
+func TestBackend_KillDuringInterruptIsBounded(t *testing.T) {
+	const grace = 300 * time.Millisecond // newBackendEnv's KillGrace
+	h, req := newBackendEnv(t, stuckBackend{output: fixtures.RunnerOutput("simple.jsonl")})
+
+	run, err := h.Start(context.Background(), req, func(core.Event) {})
+	require.NoError(t, err)
+	run.Interrupt()
+	time.Sleep(grace / 6)
+	killed := time.Now()
+	run.Kill()
+	select {
+	case <-run.Done():
+	case <-time.After(10 * grace):
+		t.Fatal("the run never ended")
+	}
+
+	// SIGTERM's grace, then SIGKILL's; without the kill the interrupt's grace comes first.
+	assert.Less(t, time.Since(killed), 2*grace+grace/2)
+	result, err := run.Wait()
+	require.NoError(t, err)
+	assert.Equal(t, core.StatusInterrupted, result.Status)
+	assert.Equal(t, -1, result.RunnerExitCode, "an abandoned agent has no exit code")
+}
+
 func TestRunnerBackend_Env(t *testing.T) {
 	e := newTestEnv(t, "simple.jsonl")
 	t.Setenv("FAKERUNNER_CAPTURE", e.capture)
