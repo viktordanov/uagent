@@ -64,6 +64,8 @@ func requestFromDTO(d requestDTO) core.Request {
 	return req
 }
 
+// itemDTO and the DTOs under it keep the payloads that depend on a kind or type
+// raw, to decode them one at a time (see Decoder.Decode).
 type itemDTO struct {
 	Sequence   int64           `json:"Sequence"`
 	RecordedAt time.Time       `json:"RecordedAt"`
@@ -79,16 +81,68 @@ type modelResponseDTO struct {
 		Stop    string          `json:"Stop"`
 		Output  []outputItemDTO `json:"Output"`
 		Usage   usageDTO        `json:"Usage"`
-		Failure *struct {
-			Code    string `json:"Code"`
-			Message string `json:"Message"`
-		} `json:"Failure"`
+		Failure *failureDTO     `json:"Failure"`
 	} `json:"Response"`
+}
+
+type failureDTO struct {
+	Code    string `json:"Code"`
+	Message string `json:"Message"`
 }
 
 type outputItemDTO struct {
 	Type string          `json:"Type"`
 	Data json.RawMessage `json:"Data"`
+}
+
+// lineDTO is itemDTO with Data decoded as dataDTO, the union of the Data shapes
+// the decoder reads, so a well-formed line decodes in one pass.
+type lineDTO struct {
+	Sequence   int64     `json:"Sequence"`
+	RecordedAt time.Time `json:"RecordedAt"`
+	Kind       string    `json:"Kind"`
+	Data       dataDTO   `json:"Data"`
+	Type       string    `json:"type"`
+	Message    string    `json:"message"`
+}
+
+// dataDTO holds inputDTO for "input" (its ID is also the "turn" ID), TurnID
+// and Response for "model_response", and TurnID, CallID, Status, and
+// Operations for "tool_call_status".
+type dataDTO struct {
+	inputDTO
+
+	TurnID     string              `json:"TurnID"`
+	Response   responseDTO         `json:"Response"`
+	CallID     string              `json:"CallID"`
+	Status     callStatusDTO       `json:"Status"`
+	Operations []shellOperationDTO `json:"Operations"`
+}
+
+type responseDTO struct {
+	Stop    string          `json:"Stop"`
+	Output  []outputDataDTO `json:"Output"`
+	Usage   usageDTO        `json:"Usage"`
+	Failure *failureDTO     `json:"Failure"`
+}
+
+// outputDataDTO is an output with Data decoded as the union of a tool call, a
+// message, and a reasoning summary.
+type outputDataDTO struct {
+	Type string `json:"Type"`
+	Data struct {
+		toolCallDTO
+		messageDTO
+		reasoningDTO
+	} `json:"Data"`
+}
+
+// shellOperationDTO is an operation with State decoded as a shell state.
+type shellOperationDTO struct {
+	ID     string        `json:"ID"`
+	Type   string        `json:"Type"`
+	Status string        `json:"Status"`
+	State  shellStateDTO `json:"State"`
 }
 
 type messageDTO struct {
@@ -146,12 +200,14 @@ type turnDTO struct {
 }
 
 type toolCallStatusDTO struct {
-	TurnID string `json:"TurnID"`
-	CallID string `json:"CallID"`
-	Status struct {
-		Error string `json:"Error"`
-	} `json:"Status"`
+	TurnID     string         `json:"TurnID"`
+	CallID     string         `json:"CallID"`
+	Status     callStatusDTO  `json:"Status"`
 	Operations []operationDTO `json:"Operations"`
+}
+
+type callStatusDTO struct {
+	Error string `json:"Error"`
 }
 
 type operationDTO struct {

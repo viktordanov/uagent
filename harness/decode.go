@@ -2,6 +2,7 @@ package harness
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,6 +11,9 @@ import (
 
 	"github.com/viktordanov/uagent/core"
 )
+
+// shellOp is the operation type of a Bash call.
+const shellOp = "shell"
 
 type callInfo struct{ name, label string }
 
@@ -39,10 +43,40 @@ func NewDecoder() *Decoder {
 }
 
 // Decode converts one stdout line. Unparseable lines become RunnerError events.
+//
+// A line decodes in one pass into dataDTO, the union of the Data shapes. A line
+// that does not fit it (malformed, or a field of an unexpected type) is decoded
+// again kind by kind, which keeps the lenient handling and the error messages
+// of a bad Data.
 func (d *Decoder) Decode(line []byte) []core.Event {
-	if strings.TrimSpace(string(line)) == "" {
+	if len(bytes.TrimSpace(line)) == 0 {
 		return nil
 	}
+	var item lineDTO
+	if json.Unmarshal(line, &item) != nil {
+		return d.decodeByKind(line)
+	}
+	if item.Type == "error" {
+		return []core.Event{core.RunnerError{At: time.Now(), Message: item.Message}}
+	}
+	at, data := item.RecordedAt, item.Data
+	switch item.Kind {
+	case "input":
+		return inputEvents(at, data.inputDTO)
+	case "turn":
+		return d.turnStarted(at, data.ID)
+	case "model_response":
+		return d.responseEvents(at, data.TurnID, data.Response)
+	case "tool_call_status":
+		return d.statusEvents(at, data.CallID, data.Status, data.Operations)
+	}
+
+	return nil
+}
+
+// decodeByKind decodes a line that does not fit dataDTO: Data by its kind, then
+// each output by its type and each shell operation's state.
+func (d *Decoder) decodeByKind(line []byte) []core.Event {
 	var item itemDTO
 	if err := json.Unmarshal(line, &item); err != nil {
 		return []core.Event{core.RunnerError{At: time.Now(), Message: "unparseable runner output: " + oneLine(string(line), 200)}}
@@ -50,41 +84,95 @@ func (d *Decoder) Decode(line []byte) []core.Event {
 	if item.Type == "error" {
 		return []core.Event{core.RunnerError{At: time.Now(), Message: item.Message}}
 	}
+	at := item.RecordedAt
 	switch item.Kind {
 	case "input":
-		return decodeInput(item)
+		var in inputDTO
+		if err := json.Unmarshal(item.Data, &in); err != nil {
+			return []core.Event{core.RunnerError{At: at, Message: fmt.Sprintf("failed to decode input: %v", err)}}
+		}
+
+		return inputEvents(at, in)
 	case "turn":
 		var turn turnDTO
 		_ = json.Unmarshal(item.Data, &turn) // a missing ID leaves TurnID empty
-		d.turns++
-		d.turnStart = item.RecordedAt
-		if turn.ID != "" {
-			d.turnIDs[turn.ID] = d.turns
+
+		return d.turnStarted(at, turn.ID)
+	case "model_response":
+		var dto modelResponseDTO
+		if err := json.Unmarshal(item.Data, &dto); err != nil {
+			return []core.Event{core.RunnerError{At: at, Message: fmt.Sprintf("failed to decode model_response: %v", err)}}
 		}
 
-		return []core.Event{core.TurnStarted{At: item.RecordedAt, Turn: d.turns, TurnID: turn.ID}}
-	case "model_response":
-		return d.decodeResponse(item)
+		return d.responseEvents(at, dto.TurnID, decodeOutputs(dto))
 	case "tool_call_status":
-		return d.decodeToolStatus(item)
+		var dto toolCallStatusDTO
+		if err := json.Unmarshal(item.Data, &dto); err != nil {
+			return []core.Event{core.RunnerError{At: at, Message: fmt.Sprintf("failed to decode tool_call_status: %v", err)}}
+		}
+
+		return d.statusEvents(at, dto.CallID, dto.Status, decodeStates(dto.Operations))
 	}
 
 	return nil
 }
 
-func (d *Decoder) decodeResponse(item itemDTO) []core.Event {
-	var dto modelResponseDTO
-	if err := json.Unmarshal(item.Data, &dto); err != nil {
-		return []core.Event{core.RunnerError{At: item.RecordedAt, Message: fmt.Sprintf("failed to decode model_response: %v", err)}}
+// decodeOutputs decodes each output by its type and drops one that does not decode.
+func decodeOutputs(dto modelResponseDTO) responseDTO {
+	raw := dto.Response
+	resp := responseDTO{Stop: raw.Stop, Usage: raw.Usage, Failure: raw.Failure}
+	for _, out := range raw.Output {
+		typed := outputDataDTO{Type: out.Type}
+		var err error
+		switch out.Type {
+		case "tool_call":
+			err = json.Unmarshal(out.Data, &typed.Data.toolCallDTO)
+		case "message":
+			err = json.Unmarshal(out.Data, &typed.Data.messageDTO)
+		case "reasoning":
+			err = json.Unmarshal(out.Data, &typed.Data.reasoningDTO)
+		}
+		if err == nil {
+			resp.Output = append(resp.Output, typed)
+		}
 	}
-	resp := dto.Response
+
+	return resp
+}
+
+// decodeStates decodes the state of each shell operation. A state that does not
+// decode reads as an empty one.
+func decodeStates(raw []operationDTO) []shellOperationDTO {
+	ops := make([]shellOperationDTO, 0, len(raw))
+	for _, op := range raw {
+		typed := shellOperationDTO{ID: op.ID, Type: op.Type, Status: op.Status}
+		if op.Type == shellOp && json.Unmarshal(op.State, &typed.State) != nil {
+			typed.State = shellStateDTO{}
+		}
+		ops = append(ops, typed)
+	}
+
+	return ops
+}
+
+func (d *Decoder) turnStarted(at time.Time, turnID string) []core.Event {
+	d.turns++
+	d.turnStart = at
+	if turnID != "" {
+		d.turnIDs[turnID] = d.turns
+	}
+
+	return []core.Event{core.TurnStarted{At: at, Turn: d.turns, TurnID: turnID}}
+}
+
+func (d *Decoder) responseEvents(at time.Time, turnID string, resp responseDTO) []core.Event {
 	turn := d.turns
-	if n, ok := d.turnIDs[dto.TurnID]; ok {
+	if n, ok := d.turnIDs[turnID]; ok {
 		turn = n
 	}
-	responded := core.ModelResponded{At: item.RecordedAt, Turn: turn, TurnID: dto.TurnID, Usage: resp.Usage.toCore(), Stop: resp.Stop}
+	responded := core.ModelResponded{At: at, Turn: turn, TurnID: turnID, Usage: resp.Usage.toCore(), Stop: resp.Stop}
 	if !d.turnStart.IsZero() {
-		responded.Duration = item.RecordedAt.Sub(d.turnStart)
+		responded.Duration = at.Sub(d.turnStart)
 	}
 	if resp.Failure != nil {
 		responded.Failure = strings.TrimSpace(resp.Failure.Code + ": " + resp.Failure.Message)
@@ -93,28 +181,21 @@ func (d *Decoder) decodeResponse(item itemDTO) []core.Event {
 	for _, out := range resp.Output {
 		switch out.Type {
 		case "tool_call":
-			var c toolCallDTO
-			if json.Unmarshal(out.Data, &c) != nil {
-				continue
-			}
+			c := out.Data.toolCallDTO
 			info := callInfo{name: c.Name, label: describeCall(c)}
 			d.calls[c.CallID] = info
 			events = append(events, core.ToolCalled{
-				At: item.RecordedAt, CallID: c.CallID, Name: info.name, Label: info.label, Arguments: c.Arguments,
+				At: at, CallID: c.CallID, Name: info.name, Label: info.label, Arguments: c.Arguments,
 			})
 		case "message":
-			var m messageDTO
-			if json.Unmarshal(out.Data, &m) != nil || m.Role != "assistant" {
+			m := out.Data.messageDTO
+			if m.Role != "assistant" {
 				continue
 			}
-			events = append(events, core.AssistantMessage{At: item.RecordedAt, Turn: turn, Text: m.Text, Final: m.Phase == "final_answer"})
+			events = append(events, core.AssistantMessage{At: at, Turn: turn, Text: m.Text, Final: m.Phase == "final_answer"})
 		case "reasoning":
-			var r reasoningDTO
-			if json.Unmarshal(out.Data, &r) != nil {
-				continue
-			}
-			for _, s := range r.Summary {
-				events = append(events, core.ReasoningSummary{At: item.RecordedAt, Turn: turn, Text: s})
+			for _, s := range out.Data.Summary {
+				events = append(events, core.ReasoningSummary{At: at, Turn: turn, Text: s})
 			}
 		}
 	}
@@ -122,28 +203,24 @@ func (d *Decoder) decodeResponse(item itemDTO) []core.Event {
 	return events
 }
 
-func (d *Decoder) decodeToolStatus(item itemDTO) []core.Event {
-	var dto toolCallStatusDTO
-	if err := json.Unmarshal(item.Data, &dto); err != nil {
-		return []core.Event{core.RunnerError{At: item.RecordedAt, Message: fmt.Sprintf("failed to decode tool_call_status: %v", err)}}
-	}
-	call := d.calls[dto.CallID]
+func (d *Decoder) statusEvents(at time.Time, callID string, status callStatusDTO, ops []shellOperationDTO) []core.Event {
+	call := d.calls[callID]
 	var events []core.Event
-	if dto.Status.Error != "" && !d.failed[dto.CallID] {
-		d.failed[dto.CallID] = true
+	if status.Error != "" && !d.failed[callID] {
+		d.failed[callID] = true
 		events = append(events, core.ToolFinished{
-			At: item.RecordedAt, CallID: dto.CallID, Name: call.name, Label: call.label,
-			Detail: oneLine(dto.Status.Error, 160),
+			At: at, CallID: callID, Name: call.name, Label: call.label,
+			Detail: oneLine(status.Error, 160),
 		})
 	}
-	for _, op := range dto.Operations {
+	for _, op := range ops {
 		outPath, errPath := shellPaths(op)
 		info, seen := d.ops[op.ID]
 		if !seen {
-			info = &opInfo{start: item.RecordedAt}
+			info = &opInfo{start: at}
 			d.ops[op.ID] = info
 			events = append(events, core.ToolStarted{
-				At: item.RecordedAt, CallID: dto.CallID, OpID: op.ID, Name: call.name, Label: call.label,
+				At: at, CallID: callID, OpID: op.ID, Name: call.name, Label: call.label,
 				OpType: op.Type, OutPath: outPath, ErrPath: errPath,
 			})
 		}
@@ -153,8 +230,8 @@ func (d *Decoder) decodeToolStatus(item itemDTO) []core.Event {
 		info.done = true
 		ok, detail := operationOutcome(op)
 		events = append(events, core.ToolFinished{
-			At: item.RecordedAt, CallID: dto.CallID, OpID: op.ID, Name: call.name, Label: call.label,
-			OK: ok, Detail: detail, Duration: item.RecordedAt.Sub(info.start),
+			At: at, CallID: callID, OpID: op.ID, Name: call.name, Label: call.label,
+			OK: ok, Detail: detail, Duration: at.Sub(info.start),
 			OpType: op.Type, OutPath: outPath, ErrPath: errPath,
 		})
 	}
@@ -162,12 +239,8 @@ func (d *Decoder) decodeToolStatus(item itemDTO) []core.Event {
 	return events
 }
 
-// decodeInput turns a persisted inbox input into a UserMessage or ControlInput.
-func decodeInput(item itemDTO) []core.Event {
-	var in inputDTO
-	if err := json.Unmarshal(item.Data, &in); err != nil {
-		return []core.Event{core.RunnerError{At: item.RecordedAt, Message: fmt.Sprintf("failed to decode input: %v", err)}}
-	}
+// inputEvents turns a persisted inbox input into a UserMessage or ControlInput.
+func inputEvents(at time.Time, in inputDTO) []core.Event {
 	switch in.Kind {
 	case "external":
 		var text string
@@ -175,15 +248,15 @@ func decodeInput(item itemDTO) []core.Event {
 			text = string(in.Payload)
 		}
 
-		return []core.Event{core.UserMessage{At: item.RecordedAt, ID: in.ID, Text: text}}
+		return []core.Event{core.UserMessage{At: at, ID: in.ID, Text: text}}
 	case "control":
 		var c controlDTO
 		if err := json.Unmarshal(in.Payload, &c); err != nil {
-			return []core.Event{core.RunnerError{At: item.RecordedAt, Message: fmt.Sprintf("failed to decode control input: %v", err)}}
+			return []core.Event{core.RunnerError{At: at, Message: fmt.Sprintf("failed to decode control input: %v", err)}}
 		}
 
 		return []core.Event{core.ControlInput{
-			At: item.RecordedAt, ID: in.ID, Mode: c.Mode, Effort: c.Parameters.ReasoningEffort, Reason: c.Reason,
+			At: at, ID: in.ID, Mode: c.Mode, Effort: c.Parameters.ReasoningEffort, Reason: c.Reason,
 		}}
 	}
 
@@ -192,27 +265,20 @@ func decodeInput(item itemDTO) []core.Event {
 
 // shellPaths returns a shell operation's output files. The runner reports
 // them once the operation has output; they are empty before that.
-func shellPaths(op operationDTO) (outPath, errPath string) {
-	if op.Type != "shell" {
-		return "", ""
-	}
-	var s shellStateDTO
-	if json.Unmarshal(op.State, &s) != nil {
+func shellPaths(op shellOperationDTO) (outPath, errPath string) {
+	if op.Type != shellOp {
 		return "", ""
 	}
 
-	return s.OutPath, s.ErrPath
+	return op.State.OutPath, op.State.ErrPath
 }
 
-func operationOutcome(op operationDTO) (ok bool, detail string) {
+func operationOutcome(op shellOperationDTO) (ok bool, detail string) {
 	ok, detail = op.Status == "completed", op.Status
-	if op.Type != "shell" {
+	if op.Type != shellOp {
 		return ok, detail
 	}
-	var s shellStateDTO
-	if json.Unmarshal(op.State, &s) != nil {
-		return ok, detail
-	}
+	s := op.State
 	if s.Result != nil {
 		detail = fmt.Sprintf("exit %d", s.Result.ExitCode)
 		ok = ok && s.Result.ExitCode == 0
@@ -240,9 +306,19 @@ func describeCall(c toolCallDTO) string {
 // ReadEvents decodes saved runner output (events.jsonl) and sends every event to sink.
 func ReadEvents(r io.Reader, sink core.Sink) error {
 	decoder := NewDecoder()
-	br := bufio.NewReaderSize(r, 1<<20)
+	br := bufio.NewReaderSize(r, 64<<10) // longer lines are joined below
+	var long []byte
 	for {
-		line, err := br.ReadBytes('\n')
+		// The line is valid until the next read: Decode copies what it keeps.
+		line, err := br.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			long = append(long[:0], line...)
+			for err == bufio.ErrBufferFull {
+				line, err = br.ReadSlice('\n')
+				long = append(long, line...)
+			}
+			line = long
+		}
 		for _, e := range decoder.Decode(line) {
 			sink(e)
 		}

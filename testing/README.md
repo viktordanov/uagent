@@ -11,7 +11,7 @@ Real captured runner output, a fake runner that replays it with its original tim
 4. [Where each layer is tested](#where-each-layer-is-tested)
 <!-- /memoria:section -->
 
-<!-- memoria:section id="fixtures" files="fixtures/fixtures.go fixtures/runner/simple.jsonl fixtures/runner/parallel.jsonl fixtures/runner/timeout.jsonl fixtures/runner/error.jsonl" -->
+<!-- memoria:section id="fixtures" files="fixtures/fixtures.go fixtures/large.go fixtures/runner/simple.jsonl fixtures/runner/parallel.jsonl fixtures/runner/timeout.jsonl fixtures/runner/error.jsonl" -->
 ## Fixtures
 
 `fixtures/runner/` holds unreal-agent-runner stdout captured from real runs, with local paths replaced by `/workspace` and `/state`:
@@ -25,6 +25,7 @@ Real captured runner output, a fake runner that replays it with its original tim
 
 `fixtures.RunnerOutput(name)` returns a capture's bytes and `fixtures.Path(name)` its file path.
 The package also builds deterministic values: `T0`, `At(d)`, `Request()`, `RequestWith(fn)`, `Turn`, and `ToolRun`.
+`fixtures.LargeRunnerOutput(turns)` builds a synthetic runner output in the shape of `parallel.jsonl`, with three Bash calls per turn and 2 to 32 KB of output per call, for benchmarks.
 Add a fixture only from real runner output, and remove local paths and credentials before committing it.
 <!-- /memoria:section -->
 
@@ -65,4 +66,5 @@ A change to decoding, statistics, or the stream format shows up as a golden diff
 
 - `core` has plain unit tests for statistics, outcome classification, and finding triage.
 - `harness` runs the fake runner through the real process code: golden streams, run records, pinned environment, failures, timeouts, interrupts and kills through the run handle, orphaned tools, the session lock, messages with IDs, preflight, and history including runs in progress. It also decodes the simple, parallel, and timeout captures directly, including user messages, control inputs, and turn IDs.
+`TestDecoder_MatchesReference` keeps the decoder from before the single-pass decode and requires the same events from both, for every capture, a large synthetic output, and malformed lines. `BenchmarkDecode` compares their speed.
 - `cmd/uagent` builds the CLI and checks stdout, stderr, and exit codes for each output mode.

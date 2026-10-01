@@ -155,4 +155,25 @@ func TestReadEvents(t *testing.T) {
 		assert.Contains(t, junk[0].(core.RunnerError).Message, "unparseable runner output: panic: oops")
 		assert.Empty(t, d.Decode([]byte("  \n")))
 	})
+
+	t.Run("a line longer than the read buffer decodes whole", func(t *testing.T) {
+		want, _ := readFixture(t, "parallel.jsonl")
+		out := strings.Repeat(`line \"quoted\"\n`, 3<<20/16)
+		data := bytes.Replace(fixtures.RunnerOutput("parallel.jsonl"), []byte(`"Out":"a.txt\n"`), []byte(`"Out":"`+out+`"`), 1)
+		require.Greater(t, len(data), 3<<20)
+
+		var got []core.Event
+		require.NoError(t, harness.ReadEvents(bytes.NewReader(data), func(e core.Event) { got = append(got, e) }))
+
+		assert.Equal(t, want, got)
+	})
+}
+
+func BenchmarkReadEvents(b *testing.B) {
+	data := fixtures.LargeRunnerOutput(100)
+	b.SetBytes(int64(len(data)))
+	b.ReportAllocs()
+	for b.Loop() {
+		require.NoError(b, harness.ReadEvents(bytes.NewReader(data), func(core.Event) {}))
+	}
 }
