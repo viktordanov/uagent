@@ -1,4 +1,4 @@
-version = 2
+version = 3
 
 # Source, tests, fixtures, and configuration stay covered. go.sum is a redundant dependency lockfile.
 ignore = ["go.sum"]
