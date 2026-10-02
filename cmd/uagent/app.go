@@ -34,7 +34,7 @@ var (
 func newApp() *cli.Command {
 	return &cli.Command{
 		Name:      "uagent",
-		Usage:     "run one unreal-agent-runner task with guards and stats",
+		Usage:     "run one uah-core-runner task with guards and stats",
 		Version:   buildVersion(),
 		ArgsUsage: "<prompt>",
 		Description: "Stdout gets the final answer (the summary JSON with --json, or a JSONL event\n" +
@@ -99,7 +99,7 @@ func runFlags() []cli.Flag {
 			Sources: cli.EnvVars("UNREAL_HARNESS_LLM_BASE_URL"),
 		},
 		&cli.StringFlag{
-			Name: "runner", Usage: "path to unreal-agent-runner", DefaultText: "~/.local/bin, then PATH",
+			Name: "runner", Usage: "path to uah-core-runner", DefaultText: "~/.local/bin, then PATH",
 			Sources: cli.EnvVars("UAGENT_RUNNER"), TakesFile: true,
 		},
 		&cli.StringFlag{

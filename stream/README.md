@@ -62,7 +62,7 @@ The runner reports output files once an operation has finished, so `out_path` an
 | Field | Meaning |
 | --- | --- |
 | `status` | `ok`, `error`, `timeout`, `interrupted`, or `disk_limit`; `running` in `summary.json` while the run is in progress |
-| `runner_exit_code` | Exit code of unreal-agent-runner, or -1 when it was killed |
+| `runner_exit_code` | Exit code of uah-core-runner, or -1 when it was killed |
 | `run_id`, `session_id`, `provider`, `model`, `effort`, `workspace` | The run's identity and settings |
 | `started_at`, `wall_ms` | Start time (UTC) and wall-clock duration |
 | `stats` | Aggregated statistics, described below |

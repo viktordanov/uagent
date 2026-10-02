@@ -1,4 +1,4 @@
-// Command uagent runs one unreal-agent-runner task with safety guards, shows
+// Command uagent runs one uah-core-runner task with safety guards, shows
 // progress, prints the final answer, and records per-run stats.
 package main
 

@@ -14,7 +14,7 @@ type UserInput struct {
 	Text string
 }
 
-// Request is one task for unreal-agent-runner plus the guards around it.
+// Request is one task for uah-core-runner plus the guards around it.
 // Set either Prompt or Messages.
 type Request struct {
 	RunID     string

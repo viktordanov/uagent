@@ -14,7 +14,7 @@ Real captured runner output, a fake runner that replays it with its original tim
 <!-- memoria:section id="fixtures" files="fixtures/fixtures.go fixtures/large.go fixtures/runner/simple.jsonl fixtures/runner/parallel.jsonl fixtures/runner/timeout.jsonl fixtures/runner/error.jsonl" -->
 ## Fixtures
 
-`fixtures/runner/` holds unreal-agent-runner stdout captured from real runs, with local paths replaced by `/workspace` and `/state`:
+`fixtures/runner/` holds runner stdout captured from real runs of unreal-agent-runner v0.1.x, whose format uah-core-runner keeps, with local paths replaced by `/workspace` and `/state`:
 
 | File | Run |
 | --- | --- |

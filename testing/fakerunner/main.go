@@ -1,4 +1,4 @@
-// Command fakerunner stands in for unreal-agent-runner. It accepts the same
+// Command fakerunner stands in for uah-core-runner. It accepts the same
 // flags and stdin request and replays a captured runner output, so uagent and
 // its TUI can be tested and demonstrated without a model or tokens.
 //

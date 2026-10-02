@@ -9,7 +9,7 @@
 </p>
 
 <!-- memoria:export id="summary" -->
-uagent is a wrapper around unreal-agent-runner that adds safety guards and everyday ergonomics while staying as close to the original runner as possible.
+uagent is a wrapper around uah-core-runner that adds safety guards and everyday ergonomics while staying as close to the original runner as possible.
 <!-- /memoria:export -->
 
 [uah](https://github.com/viktordanov/uagent-harness), a Codex-style TUI, is built on it.
@@ -28,10 +28,10 @@ uagent is a wrapper around unreal-agent-runner that adds safety guards and every
 
 ## Why a wrapper
 
-[unreal-agent-runner](https://github.com/unreallabsai/unreal-agent) is the headless runner of Unreal Agent, a Go agent harness whose tool calls run in the background while the model keeps working.
+[uah-core-runner](https://github.com/viktordanov/uah-core) is the headless runner of uah-core, the Go agent runtime under uah, whose tool calls run in the background while the model keeps working. uah-core derives from [unreal-agent](https://github.com/unreallabsai/unreal-agent), and uagent was first written for its runner.
 It runs one task from a JSON request, writes session items as JSONL, and exits, much like `codex exec` or `claude -p`.
 
-The runner is capable but raw. It stores sessions inside the workspace, loads the workspace `.env`, has no overall timeout, and prints session items rather than an answer.
+The runner, as uagent first found it (unreal-agent-runner v0.1.x), is capable but raw. It stored sessions inside the workspace, loads the workspace `.env`, has no overall timeout, and prints session items rather than an answer.
 uagent keeps the runner itself unchanged: the same request fields reach it on stdin, its output is saved byte for byte, and nothing is added to the prompt.
 What uagent adds sits around the runner: guards before and during the run, readable progress, a plain answer on stdout, and a record of every run.
 <!-- /memoria:section -->
@@ -40,7 +40,7 @@ What uagent adds sits around the runner: guards before and during the run, reada
 ## Install
 
 ```sh
-GOBIN="$HOME/.local/bin" go install github.com/unreallabsai/unreal-agent/cmd/unreal-agent-runner@latest
+GOBIN="$HOME/.local/bin" go install github.com/viktordanov/uah-core/cmd/uah-core-runner@latest
 GOBIN="$HOME/.local/bin" go install github.com/viktordanov/uagent/cmd/uagent@latest
 codex login   # for the default openai-codex provider
 ```
@@ -122,7 +122,7 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 | `--max-disk` | `5G` | | Stop the run when tool output passes this size (`500M`, `2G`); `0` disables |
 | `--allow-dotenv` | off | | Run even when the workspace `.env` sets risky variables, with a warning |
 | `--state-dir` | `~/.local/state/unreal-agent` | `UAGENT_STATE_DIR` | Sessions, logs, and run records; must be outside the workspace |
-| `--runner` | `~/.local/bin`, then `PATH` | `UAGENT_RUNNER` | The unreal-agent-runner executable |
+| `--runner` | `~/.local/bin`, then `PATH` | `UAGENT_RUNNER` | The uah-core-runner executable |
 | `--session` | a new UUID | | Create or resume a named runner session |
 
 ### Output
@@ -217,5 +217,5 @@ The [architecture notes](docs/documentation/architecture.md) explain the layout,
 <!-- memoria:section id="license" files="LICENSE NOTICE" -->
 ## License
 
-uagent is licensed under the [Apache License 2.0](LICENSE); keep the [NOTICE](NOTICE) when you redistribute it. It runs [unreal-agent-runner](https://github.com/unreallabsai/unreal-agent) (MIT) as a separate program and includes none of its code.
+uagent is licensed under the [Apache License 2.0](LICENSE); keep the [NOTICE](NOTICE) when you redistribute it. It runs [uah-core-runner](https://github.com/viktordanov/uah-core) (MIT) as a separate program and includes none of its code.
 <!-- /memoria:section -->

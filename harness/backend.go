@@ -8,7 +8,7 @@ import (
 )
 
 // A Backend runs the agent for one run. The default, RunnerBackend, spawns
-// unreal-agent-runner; another backend can run the runner's packages in
+// uah-core-runner; another backend can run the runner's packages in
 // process. Either way the harness keeps the guards, the session lock, the run
 // records, and the statistics.
 type Backend interface {

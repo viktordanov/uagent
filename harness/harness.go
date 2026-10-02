@@ -1,4 +1,4 @@
-// Package harness runs unreal-agent-runner with uagent's guards: preflight
+// Package harness runs uah-core-runner with uagent's guards: preflight
 // checks, a session lock, a pinned environment, process-group supervision, a
 // disk limit, and run records in the state directory. The CLI and the TUI both
 // call it.
@@ -22,7 +22,7 @@ import (
 )
 
 // RunnerName is the runner executable uagent looks for.
-const RunnerName = "unreal-agent-runner"
+const RunnerName = "uah-core-runner"
 
 const defaultKillGrace = 5 * time.Second
 
@@ -34,7 +34,7 @@ var errTimedOut = errors.New("run timed out")
 
 // Config configures a Harness.
 type Config struct {
-	// RunnerPath is the unreal-agent-runner executable; see FindRunner. It is
+	// RunnerPath is the uah-core-runner executable; see FindRunner. It is
 	// used when Backend is nil.
 	RunnerPath string
 	// Backend runs the agent (default: RunnerBackend with RunnerPath).
@@ -205,7 +205,7 @@ func (h *Harness) Preflight(req core.Request) ([]core.Finding, error) {
 	return findings, nil
 }
 
-// FindRunner finds unreal-agent-runner: an explicit path, then ~/.local/bin, then PATH.
+// FindRunner finds uah-core-runner: an explicit path, then ~/.local/bin, then PATH.
 func FindRunner(explicit string) (string, error) {
 	if explicit != "" {
 		if !isExecutable(explicit) {
@@ -221,7 +221,7 @@ func FindRunner(explicit string) (string, error) {
 	}
 	p, err := exec.LookPath(RunnerName)
 	if err != nil {
-		return "", fmt.Errorf("failed to find %s (install: GOBIN=\"$HOME/.local/bin\" go install github.com/unreallabsai/unreal-agent/cmd/unreal-agent-runner@latest): %w", RunnerName, err)
+		return "", fmt.Errorf("failed to find %s (install: GOBIN=\"$HOME/.local/bin\" go install github.com/viktordanov/uah-core/cmd/uah-core-runner@latest): %w", RunnerName, err)
 	}
 
 	return p, nil

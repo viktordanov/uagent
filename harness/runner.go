@@ -12,7 +12,7 @@ import (
 	"github.com/viktordanov/uagent/core"
 )
 
-// RunnerBackend spawns unreal-agent-runner in its own process group.
+// RunnerBackend spawns uah-core-runner in its own process group.
 type RunnerBackend struct {
 	// Path is the runner executable; see FindRunner.
 	Path string
