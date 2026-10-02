@@ -152,9 +152,9 @@ func TestRun_Records(t *testing.T) {
 	t.Run("provider, model, and base URL are pinned", func(t *testing.T) {
 		env, err := os.ReadFile(filepath.Join(e.capture, "env.txt"))
 		require.NoError(t, err)
-		assert.Contains(t, string(env), "UNREAL_HARNESS_LLM_PROVIDER=openai-codex\n")
-		assert.Contains(t, string(env), "UNREAL_HARNESS_LLM_MODEL=gpt-6-sol\n")
-		assert.Contains(t, string(env), "UNREAL_HARNESS_LLM_BASE_URL=\n", "an empty pin stops a workspace .env from setting it")
+		assert.Contains(t, string(env), "UAH_LLM_PROVIDER=openai-codex\n")
+		assert.Contains(t, string(env), "UAH_LLM_MODEL=gpt-6-sol\n")
+		assert.Contains(t, string(env), "UAH_LLM_BASE_URL=\n", "an empty pin stops a workspace .env from setting it")
 	})
 	t.Run("summary.json matches run_finished", func(t *testing.T) {
 		saved, err := os.ReadFile(filepath.Join(runDir, harness.SummaryFile))
@@ -183,7 +183,7 @@ func TestRun_RunnerFailure(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, core.StatusFailed, result.Status)
 	assert.Equal(t, 1, result.RunnerExitCode)
-	assert.Equal(t, []string{"model must be set in the request or UNREAL_HARNESS_LLM_MODEL"}, result.Stats.Errors)
+	assert.Equal(t, []string{"model must be set in the request or UAH_LLM_MODEL"}, result.Stats.Errors)
 }
 
 func TestRun_StopsHungRuns(t *testing.T) {
@@ -231,12 +231,12 @@ func TestRun_KillsOrphanedTools(t *testing.T) {
 func TestRun_Preflight(t *testing.T) {
 	t.Run("a risky .env blocks the run before the runner starts", func(t *testing.T) {
 		e := newTestEnv(t, "simple.jsonl")
-		require.NoError(t, os.WriteFile(filepath.Join(e.workspace, ".env"), []byte("UNREAL_HARNESS_LLM_BASE_URL=http://evil\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(e.workspace, ".env"), []byte("UAH_LLM_BASE_URL=http://evil\n"), 0o600))
 
 		_, err := e.run(t, context.Background())
 
 		require.ErrorIs(t, err, harness.ErrPreflightBlocked)
-		assert.ErrorContains(t, err, "UNREAL_HARNESS_LLM_BASE_URL")
+		assert.ErrorContains(t, err, "UAH_LLM_BASE_URL")
 		assert.Empty(t, e.events)
 		assert.NoDirExists(t, filepath.Join(e.stateDir, "runs"))
 	})

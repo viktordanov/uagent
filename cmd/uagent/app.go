@@ -72,12 +72,12 @@ func runFlags() []cli.Flag {
 	return []cli.Flag{
 		&cli.StringFlag{
 			Name: "provider", Usage: "LLM provider: " + strings.Join(providers, ", "), Value: codexProvider,
-			Sources: cli.EnvVars("UNREAL_HARNESS_LLM_PROVIDER"), Validator: oneOf("provider", providers),
+			Sources: cli.EnvVars("UAH_LLM_PROVIDER"), Validator: oneOf("provider", providers),
 		},
 		&cli.StringFlag{
 			Name: "model", Aliases: []string{"m"}, Usage: "model ID",
 			DefaultText: defaultCodexModel + " for openai-codex, else provider default",
-			Sources:     cli.EnvVars("UNREAL_HARNESS_LLM_MODEL"),
+			Sources:     cli.EnvVars("UAH_LLM_MODEL"),
 		},
 		&cli.StringFlag{
 			Name: "effort", Aliases: []string{"e"}, Usage: "thinking level: " + strings.Join(efforts, ", "),
@@ -96,7 +96,7 @@ func runFlags() []cli.Flag {
 		&cli.StringFlag{Name: "system-prompt", Usage: "replace the default system prompt"},
 		&cli.StringFlag{
 			Name: "base-url", Usage: "LLM base URL override", DefaultText: "provider default",
-			Sources: cli.EnvVars("UNREAL_HARNESS_LLM_BASE_URL"),
+			Sources: cli.EnvVars("UAH_LLM_BASE_URL"),
 		},
 		&cli.StringFlag{
 			Name: "runner", Usage: "path to uah-core-runner", DefaultText: "~/.local/bin, then PATH",
@@ -114,7 +114,7 @@ func runFlags() []cli.Flag {
 		&cli.StringSliceFlag{Name: "disallow", Usage: "tool name to disable, e.g. ViewImage (repeatable)"},
 		&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Usage: "no progress output, summary only"},
 		&cli.BoolFlag{Name: "verbose", Usage: "also show reasoning summaries"},
-		&cli.BoolFlag{Name: "allow-dotenv", Usage: "run even if the workspace .env sets UNREAL_HARNESS_*, proxy, or Codex auth variables"},
+		&cli.BoolFlag{Name: "allow-dotenv", Usage: "run even if the workspace .env sets UAH_LLM_*, proxy, or Codex auth variables"},
 		&cli.StringFlag{Name: "log-level", Usage: "diagnostic log level on stderr: debug, info, warn, error", Value: "warn", Validator: oneOfMap("log-level", logLevels)},
 	}
 }
@@ -143,6 +143,11 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: logLevels[cmd.String("log-level")]}))
+	if stateDir == harness.DefaultStateDir() {
+		if err := harness.MoveLegacyStateDir(); err != nil {
+			logger.LogAttrs(ctx, slog.LevelDebug, "legacy state dir not moved", slog.Any("error", err))
+		}
+	}
 	h := harness.New(harness.Config{RunnerPath: bin, StateDir: stateDir, MaxDisk: maxDisk, Logger: logger})
 
 	req := core.Request{

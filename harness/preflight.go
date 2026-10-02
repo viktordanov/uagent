@@ -93,7 +93,7 @@ func riskyDotenvKeys(workspace string) ([]string, error) {
 func isRiskyEnv(name string) bool {
 	upper := strings.ToUpper(name)
 
-	return strings.HasPrefix(upper, "UNREAL_HARNESS_") ||
+	return strings.HasPrefix(upper, "UAH_LLM_") ||
 		strings.HasPrefix(upper, "OPENAI_CODEX_") ||
 		upper == "CODEX_HOME" ||
 		strings.HasSuffix(upper, "_PROXY")
@@ -113,8 +113,8 @@ func (c *checker) checkAuth(provider string) ([]core.Finding, error) {
 		return nil, nil
 	}
 	env := apiKeyEnv[provider]
-	if strings.TrimSpace(c.getenv("UNREAL_HARNESS_LLM_API_KEY")) == "" && strings.TrimSpace(c.getenv(env)) == "" {
-		return []core.Finding{blocking(core.FindingAuthMissing, fmt.Sprintf("provider %s needs %s or UNREAL_HARNESS_LLM_API_KEY", provider, env))}, nil
+	if strings.TrimSpace(c.getenv("UAH_LLM_API_KEY")) == "" && strings.TrimSpace(c.getenv(env)) == "" {
+		return []core.Finding{blocking(core.FindingAuthMissing, fmt.Sprintf("provider %s needs %s or UAH_LLM_API_KEY", provider, env))}, nil
 	}
 
 	return nil, nil

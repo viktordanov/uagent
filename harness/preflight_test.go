@@ -80,7 +80,7 @@ func TestPreflight(t *testing.T) {
 
 	t.Run("risky .env keys block", func(t *testing.T) {
 		h := newPreflightEnv(t)
-		dotenv := "FOO=1\nexport UNREAL_HARNESS_LLM_BASE_URL=http://evil\nHTTPS_PROXY=x\n# CODEX_HOME=ignored\n"
+		dotenv := "FOO=1\nexport UAH_LLM_BASE_URL=http://evil\nHTTPS_PROXY=x\n# CODEX_HOME=ignored\n"
 		require.NoError(t, os.WriteFile(filepath.Join(h.workspace, ".env"), []byte(dotenv), 0o600))
 
 		findings := h.check(t, "openai-codex")
@@ -88,7 +88,7 @@ func TestPreflight(t *testing.T) {
 		require.Len(t, findings, 1)
 		assert.Equal(t, core.FindingDotenvRisky, findings[0].Code)
 		assert.Equal(t, core.SeverityBlocking, findings[0].Severity)
-		assert.Contains(t, findings[0].Message, "UNREAL_HARNESS_LLM_BASE_URL, HTTPS_PROXY")
+		assert.Contains(t, findings[0].Message, "UAH_LLM_BASE_URL, HTTPS_PROXY")
 	})
 
 	t.Run("state dir inside the workspace blocks", func(t *testing.T) {

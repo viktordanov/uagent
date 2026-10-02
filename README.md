@@ -53,7 +53,7 @@ uagent -e xhigh -t 20m -C ~/code/proj "Fix the failing test in pkg/foo"
 echo "Explain the build" | uagent -q
 uagent --json "..." | jq .stats.tokens     # answer and statistics as JSON
 uagent --stream "..."                       # JSONL events for another program
-uagent stats ~/.local/state/unreal-agent/runs/<run-id>
+uagent stats ~/.local/state/uagent/runs/<run-id>
 ```
 
 The prompt comes from the arguments, or from stdin when there are none or the only argument is `-`.
@@ -67,10 +67,10 @@ Flags can come before or after the prompt.
 
 | Flag | Default | Environment | Meaning |
 | --- | --- | --- | --- |
-| `--provider` | `openai-codex` | `UNREAL_HARNESS_LLM_PROVIDER` | How the runner authenticates and which endpoint it calls by default |
-| `-m`, `--model` | `gpt-6-sol` for `openai-codex`, `gpt-6-astra` for `openai` | `UNREAL_HARNESS_LLM_MODEL` | The provider's model ID, passed through unchanged |
+| `--provider` | `openai-codex` | `UAH_LLM_PROVIDER` | How the runner authenticates and which endpoint it calls by default |
+| `-m`, `--model` | `gpt-6-sol` for `openai-codex`, `gpt-6-astra` for `openai` | `UAH_LLM_MODEL` | The provider's model ID, passed through unchanged |
 | `-e`, `--effort` | `high` | | Thinking level: `low`, `medium`, `high`, `xhigh`, or `max` |
-| `--base-url` | the provider's endpoint | `UNREAL_HARNESS_LLM_BASE_URL` | Send requests to another server |
+| `--base-url` | the provider's endpoint | `UAH_LLM_BASE_URL` | Send requests to another server |
 | `--max-attempts` | the runner's default (5) | | Retries for failed model requests; 1 disables retries |
 | `--system-prompt` | the runner's prompt | | Replace the runner's system prompt |
 | `--disallow` | | | A tool the model may not use (`Bash`, `ViewImage`, or `SkillUse`); repeat for more |
@@ -85,7 +85,7 @@ Every provider speaks the OpenAI Responses API and posts to `<base URL>/response
 | `fireworks` | `FIREWORKS_API_KEY` | `https://api.fireworks.ai/inference/v1` | none; pass `--model` |
 | `ollama` | none | `http://localhost:11434/v1` | none; pass `--model` |
 
-`UNREAL_HARNESS_LLM_API_KEY` works for every keyed provider. uagent checks credentials and the model before starting, so a missing key or model fails immediately with exit code 2.
+`UAH_LLM_API_KEY` works for every keyed provider. uagent checks credentials and the model before starting, so a missing key or model fails immediately with exit code 2.
 
 ```sh
 # Codex subscription (the default backend)
@@ -108,9 +108,9 @@ uagent --provider ollama --model <model> --effort low --base-url http://gpu-box:
 uagent --provider openai --model <model> --effort medium --base-url http://localhost:8000/v1 "..."
 ```
 
-The `openai` provider always needs `OPENAI_API_KEY` or `UNREAL_HARNESS_LLM_API_KEY`; for a local server that ignores keys, any value works.
+The `openai` provider always needs `OPENAI_API_KEY` or `UAH_LLM_API_KEY`; for a local server that ignores keys, any value works.
 
-To make a backend the default, export the variables, for example `export UNREAL_HARNESS_LLM_PROVIDER=openrouter UNREAL_HARNESS_LLM_MODEL=<vendor>/<model>`.
+To make a backend the default, export the variables, for example `export UAH_LLM_PROVIDER=openrouter UAH_LLM_MODEL=<vendor>/<model>`.
 Flags win over the environment. uagent always passes the provider, model, and base URL to the runner explicitly, so a workspace `.env` cannot change them.
 
 ### Guards and limits
@@ -121,7 +121,7 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 | `-t`, `--timeout` | `30m` | | Stop the run and all its tools after this long; `0` disables |
 | `--max-disk` | `5G` | | Stop the run when tool output passes this size (`500M`, `2G`); `0` disables |
 | `--allow-dotenv` | off | | Run even when the workspace `.env` sets risky variables, with a warning |
-| `--state-dir` | `~/.local/state/unreal-agent` | `UAGENT_STATE_DIR` | Sessions, logs, and run records; must be outside the workspace |
+| `--state-dir` | `~/.local/state/uagent` | `UAGENT_STATE_DIR` | Sessions, logs, and run records; must be outside the workspace. The first run moves the `~/.local/state/unreal-agent` of earlier versions here |
 | `--runner` | `~/.local/bin`, then `PATH` | `UAGENT_RUNNER` | The uah-core-runner executable |
 | `--session` | a new UUID | | Create or resume a named runner session |
 
@@ -154,8 +154,8 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 
 | Runner behavior | Guard |
 | --- | --- |
-| Sessions stored in the workspace can be read back by the agent's own background searches and grow without limit (unreal-agent issue #3). | Sessions, logs, and run records live in `~/.local/state/unreal-agent`. A state directory inside the workspace is refused. `--max-disk` (default 5G) stops a run whose tool output grows past the limit. |
-| The workspace `.env` is loaded and can redirect the model endpoint or credentials (issue #5). | A `.env` that sets `UNREAL_HARNESS_*`, `OPENAI_CODEX_*`, `CODEX_HOME`, or `*_PROXY` blocks the run unless `--allow-dotenv` is given. Provider, model, and base URL are always set explicitly for the runner, so a `.env` cannot override them. |
+| Sessions stored in the workspace can be read back by the agent's own background searches and grow without limit (unreal-agent issue #3). | Sessions, logs, and run records live in `~/.local/state/uagent`. A state directory inside the workspace is refused. `--max-disk` (default 5G) stops a run whose tool output grows past the limit. |
+| The workspace `.env` is loaded and can redirect the model endpoint or credentials (issue #5). | A `.env` that sets `UAH_LLM_*`, `OPENAI_CODEX_*`, `CODEX_HOME`, or `*_PROXY` blocks the run unless `--allow-dotenv` is given. Provider, model, and base URL are always set explicitly for the runner, so a `.env` cannot override them. |
 | No overall time limit, and background tools can outlive a run. | `--timeout` (default 30m) and Ctrl+C stop the runner gracefully: SIGINT first, so it records its state, then SIGTERM and SIGKILL if it does not stop within 5 s. A kill skips that wait, and a runner that outlives SIGKILL by another 5 s is abandoned so the run still ends. Tools and processes still running after the runner exits, for any reason, are killed, and tools left behind by a run that was itself killed are killed when its session next starts. |
 | Session files have no lock, so two runs on one session corrupt it. | Each run holds a lock on its session (`sessions/<id>.lock`). A second run on the same `--session` fails at once with exit code 2. |
 | Codex tokens are never refreshed. | An expired token stops the run before it starts; a token that expires within an hour produces a warning. |
@@ -164,7 +164,7 @@ Flags win over the environment. uagent always passes the provider, model, and ba
 
 - A plain answer on stdout, with progress and a summary on stderr, so uagent composes with pipes and scripts.
 - A prompt from an argument or stdin, sensible defaults, and flags that validate their values.
-- A record of every run in `~/.local/state/unreal-agent/runs/<run-id>/`: `request.json`, the raw runner output in `events.jsonl`, `stderr.log`, and `summary.json`.
+- A record of every run in `~/.local/state/uagent/runs/<run-id>/`: `request.json`, the raw runner output in `events.jsonl`, `stderr.log`, and `summary.json`.
 - Statistics for comparing the runner with other agents: wall time, model time, tool busy time, tool time that overlapped model time, turns, tool calls and failures, parallelism, and tokens.
 <!-- /memoria:section -->
 
@@ -180,6 +180,7 @@ The CLI is a thin layer over two packages, and a TUI or another tool can use the
   - `Preflight` checks a request without running it. `LockSession` is the per-session lock every run takes.
   - `Config.Backend` swaps how the agent runs. The default, `RunnerBackend`, spawns the runner (its `Env` adds variables to the runner's environment, such as `SHELL`); another backend can run the runner's packages in process and keep every guard, the lock, and the run records. `Run.Process` returns the backend's handle.
   - `Runs` lists every run record, including runs in progress; `History` lists finished runs; `LoadRequest`, `LoadEvents`, and `Load` reopen one.
+  - `DefaultStateDir` is `~/.local/state/uagent` (`$XDG_STATE_HOME/uagent`). `MoveLegacyStateDir` renames the `unreal-agent` state directory of earlier versions to it when it does not exist yet; the CLI calls it before a run that uses the default.
 
 ```go
 h := harness.New(harness.Config{RunnerPath: runner, StateDir: harness.DefaultStateDir()})

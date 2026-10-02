@@ -66,9 +66,9 @@ func (p *runnerProcess) Kill()                 { signalGroups([]int{p.pgid}, sys
 // workspace .env from overriding them.
 func runnerEnv(req core.Request, extra []string) []string {
 	pinned := map[string]string{
-		"UNREAL_HARNESS_LLM_PROVIDER": req.Provider,
-		"UNREAL_HARNESS_LLM_MODEL":    req.Model,
-		"UNREAL_HARNESS_LLM_BASE_URL": req.BaseURL,
+		"UAH_LLM_PROVIDER": req.Provider,
+		"UAH_LLM_MODEL":    req.Model,
+		"UAH_LLM_BASE_URL": req.BaseURL,
 	}
 	var env []string
 	for _, kv := range append(os.Environ(), extra...) {

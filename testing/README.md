@@ -21,7 +21,7 @@ Real captured runner output, a fake runner that replays it with its original tim
 | `simple.jsonl` | Two parallel Bash calls, then the final answer `hello` |
 | `parallel.jsonl` | Three Bash calls over four turns, then `A; B` |
 | `timeout.jsonl` | One long Bash call that never finishes |
-| `error.jsonl` | The runner's error line when no model is set |
+| `error.jsonl` | The runner's error line when no model is set, naming uah-core-runner's `UAH_LLM_MODEL` |
 
 `fixtures.RunnerOutput(name)` returns a capture's bytes and `fixtures.Path(name)` its file path.
 The package also builds deterministic values: `T0`, `At(d)`, `Request()`, `RequestWith(fn)`, `Turn`, and `ToolRun`.

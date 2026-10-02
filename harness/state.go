@@ -21,18 +21,39 @@ const (
 	SummaryFile = "summary.json"
 )
 
-// DefaultStateDir is $XDG_STATE_HOME/unreal-agent or ~/.local/state/unreal-agent.
+// DefaultStateDir is $XDG_STATE_HOME/uagent or ~/.local/state/uagent.
 // It holds runner sessions, logs, and run records, always outside the workspace.
-func DefaultStateDir() string {
+func DefaultStateDir() string { return stateDirNamed("uagent") }
+
+// MoveLegacyStateDir renames the state directory of earlier versions,
+// $XDG_STATE_HOME/unreal-agent or ~/.local/state/unreal-agent, to
+// DefaultStateDir. It does nothing when DefaultStateDir exists or the old
+// directory does not, so the move happens once.
+func MoveLegacyStateDir() error {
+	dir, legacy := DefaultStateDir(), stateDirNamed("unreal-agent")
+	if _, err := os.Lstat(dir); !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if _, err := os.Lstat(legacy); err != nil {
+		return nil
+	}
+	if err := os.Rename(legacy, dir); err != nil {
+		return fmt.Errorf("failed to move state dir: %w", err)
+	}
+
+	return nil
+}
+
+func stateDirNamed(name string) string {
 	if dir := os.Getenv("XDG_STATE_HOME"); dir != "" {
-		return filepath.Join(dir, "unreal-agent")
+		return filepath.Join(dir, name)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".", ".uagent-state")
 	}
 
-	return filepath.Join(home, ".local", "state", "unreal-agent")
+	return filepath.Join(home, ".local", "state", name)
 }
 
 // layout resolves paths under one state root.

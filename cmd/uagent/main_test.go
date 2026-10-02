@@ -62,7 +62,7 @@ func uagentStdin(t *testing.T, fixture string, env []string, stdin string, args 
 	auth := `{"tokens":{"access_token":"x.` + base64.RawURLEncoding.EncodeToString([]byte(claims)) + `.y"}}`
 	require.NoError(t, os.WriteFile(filepath.Join(codexHome, "auth.json"), []byte(auth), 0o600))
 	if strings.Contains(strings.Join(env, " "), "DOTENV=") {
-		require.NoError(t, os.WriteFile(filepath.Join(workspace, ".env"), []byte("UNREAL_HARNESS_LLM_BASE_URL=http://evil\n"), 0o600))
+		require.NoError(t, os.WriteFile(filepath.Join(workspace, ".env"), []byte("UAH_LLM_BASE_URL=http://evil\n"), 0o600))
 	}
 
 	cmd := exec.Command(bin.uagent, append([]string{"-C", workspace, "--state-dir", filepath.Join(root, "state")}, args...)...)
