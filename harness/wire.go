@@ -244,7 +244,8 @@ type sessionRecordDTO struct {
 			ID     string `json:"ID"`
 			Status string `json:"Status"`
 			State  struct {
-				ProcessGroupID int `json:"ProcessGroupID"`
+				ProcessGroupID    int    `json:"ProcessGroupID"`
+				ProcessGroupStart string `json:"ProcessGroupStart"`
 			} `json:"State"`
 		} `json:"Operation"`
 	} `json:"data"`

@@ -27,6 +27,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/viktordanov/uagent/internal/procstart"
 )
 
 func main() {
@@ -172,7 +174,11 @@ func startTools(sessionDir, sessionID, capture string) error {
 	if err := tool.Start(); err != nil {
 		return err
 	}
-	record := fmt.Sprintf(`{"type":"operation","data":{"Operation":{"ID":"op-hang","Status":"awaiting","State":{"ProcessGroupID":%d}}}}`+"\n", tool.Process.Pid)
+	start, err := procstart.Of(tool.Process.Pid)
+	if err != nil {
+		return err
+	}
+	record := fmt.Sprintf(`{"type":"operation","data":{"Operation":{"ID":"op-hang","Status":"awaiting","State":{"ProcessGroupID":%d,"ProcessGroupStart":%q}}}}`+"\n", tool.Process.Pid, start)
 	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		return err
 	}

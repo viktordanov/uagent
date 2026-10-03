@@ -10,10 +10,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/viktordanov/uagent/core"
+	"github.com/viktordanov/uagent/internal/procstart"
 )
 
 const (
@@ -185,7 +187,7 @@ func (p *process) stopGracefully(kill <-chan struct{}) {
 // SIGTERM, a grace period, then SIGKILL. An agent that outlives SIGKILL by
 // another grace period is abandoned, so it cannot hold the run open.
 func (p *process) teardown() {
-	groups := liveOperationGroups(p.sessionFile)
+	groups := liveOperationGroups(p.sessionFile, p.log)
 	p.agent.Terminate()
 	signalGroups(groups, syscall.SIGTERM)
 	select {
@@ -205,7 +207,7 @@ func (p *process) teardown() {
 func (p *process) finish(ctx context.Context, termination core.Termination) processExit {
 	// The agent is gone, or teardown abandoned it. Its process group and the
 	// tools it still records as running are orphans; nothing of this run may outlive it.
-	if orphans := liveOperationGroups(p.sessionFile); len(orphans) > 0 {
+	if orphans := liveOperationGroups(p.sessionFile, p.log); len(orphans) > 0 {
 		p.log.LogAttrs(ctx, slog.LevelInfo, "killing orphaned tools", slog.Int("groups", len(orphans)))
 		signalGroups(orphans, syscall.SIGKILL)
 	}
@@ -247,8 +249,9 @@ func signalGroups(groups []int, sig syscall.Signal) {
 }
 
 // liveOperationGroups returns process groups of operations whose latest
-// recorded status in the session file is not terminal.
-func liveOperationGroups(sessionFile string) []int {
+// recorded status in the session file is not terminal and that are still the
+// groups the runner recorded (sameGroup). It logs the ones it leaves alone.
+func liveOperationGroups(sessionFile string, log *slog.Logger) []int {
 	f, err := os.Open(sessionFile)
 	if err != nil {
 		return nil
@@ -257,6 +260,7 @@ func liveOperationGroups(sessionFile string) []int {
 	type opState struct {
 		status string
 		pgid   int
+		start  string
 	}
 	latest := map[string]opState{}
 	br := bufio.NewReaderSize(f, 1<<20)
@@ -268,7 +272,7 @@ func liveOperationGroups(sessionFile string) []int {
 			state := latest[op.ID]
 			state.status = op.Status
 			if op.State.ProcessGroupID != 0 {
-				state.pgid = op.State.ProcessGroupID
+				state.pgid, state.start = op.State.ProcessGroupID, op.State.ProcessGroupStart
 			}
 			latest[op.ID] = state
 		}
@@ -278,12 +282,62 @@ func liveOperationGroups(sessionFile string) []int {
 	}
 	var groups []int
 	for _, s := range latest {
-		if s.pgid > 1 && !isTerminal(s.status) {
-			groups = append(groups, s.pgid)
+		if s.pgid <= 1 || isTerminal(s.status) {
+			continue
 		}
+		if ok, reason := sameGroup(s.pgid, s.start); !ok {
+			if reason != "" {
+				log.Warn("not killing a recorded tool process group",
+					slog.Int("process_group", s.pgid),
+					slog.String("reason", reason))
+			}
+
+			continue
+		}
+		groups = append(groups, s.pgid)
 	}
 
 	return groups
+}
+
+// sameGroup reports whether process group pgid is still the one whose leader
+// had the identity start (procstart.Of) when the runner recorded it. A
+// process ID is free for reuse once its process and group are gone, and after
+// a reboot every recorded ID can name an unrelated process, so the ID alone
+// must not be signaled. While a group exists its ID is not reused, so a live
+// leader with the recorded identity is the recorded group. A group whose
+// leader exited cannot be told apart from a later group with the same ID, and
+// is left alone. The reason is empty when there is nothing left to kill.
+func sameGroup(pgid int, start string) (bool, string) {
+	if start == "" {
+		return false, "the record has no process start (an older runner wrote it)"
+	}
+	current, err := procstart.Of(pgid)
+	switch {
+	case errors.Is(err, procstart.ErrNoProcess):
+		if !groupExists(pgid) {
+			return false, ""
+		}
+
+		return false, "the group's leader exited, so the group cannot be verified"
+	case err != nil:
+		return false, "cannot read the leader's start: " + err.Error()
+	case current == start:
+		return true, ""
+	}
+	recordedBoot, _, _ := strings.Cut(start, "/")
+	currentBoot, _, _ := strings.Cut(current, "/")
+	if recordedBoot != currentBoot {
+		return false, "recorded before the system restarted"
+	}
+
+	return false, "the process ID now belongs to another process"
+}
+
+func groupExists(pgid int) bool {
+	err := syscall.Kill(-pgid, 0)
+
+	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
 func dirSize(dir string) int64 {

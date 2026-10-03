@@ -6,6 +6,7 @@ uagent is a CLI with a small pure core and well-organized infrastructure around 
 | --- | --- |
 | `core` | Pure model and rules: request, result, events, statistics, finding triage, and outcome classification. Standard library only, no I/O. |
 | `harness` | Infrastructure, one concern per file: `harness.go` (`Start`, `Run`, and the public API), `run.go` (the run handle), `backend.go` (the `Backend` and `Process` interfaces), `runner.go` (the default backend: the runner subprocess), `process.go` (run records, output, stopping, and tool process groups), `lock.go` (the session lock), `decode.go` and `wire.go` (runner JSONL), `preflight.go`, and `state.go` (state directory and run records). |
+| `internal/procstart` | A process's boot and start time, which the harness compares with the runner's record before it signals a tool's process group. The runner records the same string with uah-core's own implementation. |
 | `stream` | The versioned JSONL encoding of core events and summaries, for `--stream` and `summary.json`. |
 | `cmd/uagent` | The CLI: flags, terminal rendering, and exit codes. |
 | `testing` | Fixtures, the fake runner, and golden files. |

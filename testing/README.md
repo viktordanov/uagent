@@ -43,7 +43,7 @@ Add a fixture only from real runner output, and remove local paths and credentia
 | `FAKERUNNER_CAPTURE` | A directory that receives `stdin.json`, `env.txt`, and the pids of started tools |
 | `FAKERUNNER_ECHO` | `1` first writes an input item for each request message, the way the runner acknowledges delivery: `developer` for a developer message, else `external` |
 
-The background tools are one child in the runner's process group and one in its own group, recorded in the session file the way the real runner records operations.
+The background tools are one child in the runner's process group and one in its own group, recorded in the session file the way the real runner records operations, with the process group's ID and its leader's start (`internal/procstart`).
 That lets the tests prove that timeouts, interrupts, and runner exits leave no process behind.
 
 The fake runner also drives uagent by hand, for example while working on a TUI:
@@ -65,6 +65,6 @@ A change to decoding, statistics, or the stream format shows up as a golden diff
 ## Where each layer is tested
 
 - `core` has plain unit tests for statistics, outcome classification, and finding triage.
-- `harness` runs the fake runner through the real process code: golden streams, run records, pinned environment, failures, timeouts, interrupts and kills through the run handle, orphaned tools, the session lock, messages with IDs, preflight, and history including runs in progress. It also decodes the simple, parallel, and timeout captures directly, including user messages, control inputs, and turn IDs.
+- `harness` runs the fake runner through the real process code: golden streams, run records, pinned environment, failures, timeouts, interrupts and kills through the run handle, orphaned tools, recorded process groups that are no longer the tool's (an earlier boot, a reused ID, no recorded start, an exited leader), the session lock, messages with IDs, preflight, and history including runs in progress. It also decodes the simple, parallel, and timeout captures directly, including user messages, control inputs, and turn IDs.
 `TestDecoder_MatchesReference` keeps the decoder from before the single-pass decode and requires the same events from both, for every capture, a large synthetic output, and malformed lines. `BenchmarkDecode` compares their speed.
 - `cmd/uagent` builds the CLI and checks stdout, stderr, and exit codes for each output mode.

@@ -121,7 +121,7 @@ func (h *Harness) Start(ctx context.Context, req core.Request, sink core.Sink) (
 	// A run that ended without cleaning up (uagent or uah was killed) leaves
 	// its tools running and recorded as live. The lock means no run owns
 	// them now, and the runner would only mark them failed on resume.
-	if orphans := liveOperationGroups(h.layout.sessionFile(req.SessionID)); len(orphans) > 0 {
+	if orphans := liveOperationGroups(h.layout.sessionFile(req.SessionID), h.log); len(orphans) > 0 {
 		h.log.LogAttrs(ctx, slog.LevelInfo, "killing tools left by an earlier run",
 			slog.String("session_id", req.SessionID),
 			slog.Int("groups", len(orphans)))
