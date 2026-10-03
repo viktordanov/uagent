@@ -177,6 +177,7 @@ The CLI is a thin layer over two packages, and a TUI or another tool can use the
 - `harness` runs the runner with every guard. `New(Config)` returns a `Harness`:
   - `Run(ctx, request, sink)` streams events to `sink` and returns the `Result`. `Start` does the same but returns a `Run` handle at once, with `Wait`, `Interrupt` (graceful), `Kill`, and `Done`.
   - A request carries either a `Prompt` or `Messages`, each with an ID. The runner echoes every message as a `UserMessage` event with the same ID, which confirms delivery.
+  - A message with `Role: core.RoleDeveloper` is the harness's, not the user's, such as context it prepares for a new session. The model reads it as a developer message with the next user message, so `Messages` must include at least one user message. The runner echoes it as a `DeveloperMessage` event, which does not count as a user message.
   - `Preflight` checks a request without running it. `LockSession` is the per-session lock every run takes.
   - `Config.Backend` swaps how the agent runs. The default, `RunnerBackend`, spawns the runner (its `Env` adds variables to the runner's environment, such as `SHELL`); another backend can run the runner's packages in process and keep every guard, the lock, and the run records. `Run.Process` returns the backend's handle.
   - `Runs` lists every run record, including runs in progress; `History` lists finished runs; `LoadRequest`, `LoadEvents`, and `Load` reopen one.

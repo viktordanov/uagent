@@ -30,7 +30,11 @@ type requestMessageDTO struct {
 func requestToDTO(req core.Request) requestDTO {
 	messages := make([]requestMessageDTO, 0, len(req.Messages))
 	for _, m := range req.Messages {
-		messages = append(messages, requestMessageDTO{Role: "user", Content: m.Text, MessageID: m.ID})
+		role := m.Role
+		if role == "" {
+			role = core.RoleUser
+		}
+		messages = append(messages, requestMessageDTO{Role: string(role), Content: m.Text, MessageID: m.ID})
 	}
 
 	return requestDTO{
@@ -58,7 +62,11 @@ func requestFromDTO(d requestDTO) core.Request {
 		MaxAttempts:     d.MaxAttempts,
 	}
 	for _, m := range d.Messages {
-		req.Messages = append(req.Messages, core.UserInput{ID: m.MessageID, Text: m.Content})
+		in := core.UserInput{ID: m.MessageID, Text: m.Content}
+		if m.Role == string(core.RoleDeveloper) {
+			in.Role = core.RoleDeveloper
+		}
+		req.Messages = append(req.Messages, in)
 	}
 
 	return req
@@ -180,7 +188,8 @@ func (u usageDTO) toCore() core.Tokens {
 }
 
 // inputDTO is an inbox input the runner persisted: a user message
-// ("external", with a JSON string payload) or a control message.
+// ("external", with a JSON string payload), a developer message
+// ("developer", the same), or a control message.
 type inputDTO struct {
 	ID      string          `json:"ID"`
 	Kind    string          `json:"Kind"`

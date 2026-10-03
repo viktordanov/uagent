@@ -165,8 +165,9 @@ func (h *Harness) Start(ctx context.Context, req core.Request, sink core.Sink) (
 	return r, nil
 }
 
-// normalizeRequest checks that exactly one of Prompt and Messages is set and
-// gives every message an ID.
+// normalizeRequest checks that exactly one of Prompt and Messages is set,
+// that the messages have known roles and include the user's, and gives every
+// message an ID.
 func normalizeRequest(req core.Request) (core.Request, error) {
 	hasPrompt := strings.TrimSpace(req.Prompt) != ""
 	switch {
@@ -176,14 +177,25 @@ func normalizeRequest(req core.Request) (core.Request, error) {
 		return req, errors.New("failed to start run: the request has no prompt or messages")
 	}
 	messages := make([]core.UserInput, len(req.Messages))
+	users := 0
 	for i, m := range req.Messages {
 		if strings.TrimSpace(m.Text) == "" {
 			return req, fmt.Errorf("failed to start run: message %d is empty", i+1)
+		}
+		switch m.Role {
+		case "", core.RoleUser:
+			users++
+		case core.RoleDeveloper:
+		default:
+			return req, fmt.Errorf("failed to start run: message %d has unknown role %q", i+1, m.Role)
 		}
 		if m.ID == "" {
 			m.ID = uuid.NewString()
 		}
 		messages[i] = m
+	}
+	if len(messages) > 0 && users == 0 {
+		return req, errors.New("failed to start run: the messages include no user message")
 	}
 	if len(messages) > 0 {
 		req.Messages = messages

@@ -129,8 +129,8 @@ func (c *StatsCollector) Add(event Event) {
 	case UserMessage:
 		c.observe(e.At)
 		c.stats.UserMessages++
-	case ControlInput:
-		c.observe(e.At)
+	case DeveloperMessage, ControlInput:
+		c.observe(e.OccurredAt())
 	case RunnerError:
 		c.stats.Errors = append(c.stats.Errors, e.Message)
 	case PreflightWarning:

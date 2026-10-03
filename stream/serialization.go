@@ -44,6 +44,13 @@ type UserMessageDTO struct {
 	Text string `json:"text"`
 }
 
+type DeveloperMessageDTO struct {
+	header
+
+	ID   string `json:"id"`
+	Text string `json:"text"`
+}
+
 type ControlInputDTO struct {
 	header
 
@@ -191,6 +198,8 @@ func EventToDTO(event core.Event) (dto any, ok bool) {
 		return PreflightWarningDTO{header: newHeader("preflight_warning", e.At), Code: e.Code, Message: e.Message}, true
 	case core.UserMessage:
 		return UserMessageDTO{header: newHeader("user_message", e.At), ID: e.ID, Text: e.Text}, true
+	case core.DeveloperMessage:
+		return DeveloperMessageDTO{header: newHeader("developer_message", e.At), ID: e.ID, Text: e.Text}, true
 	case core.ControlInput:
 		return ControlInputDTO{header: newHeader("control_input", e.At), ID: e.ID, Mode: e.Mode, Effort: e.Effort, Reason: e.Reason}, true
 	case core.TurnStarted:

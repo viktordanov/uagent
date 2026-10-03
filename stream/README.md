@@ -39,6 +39,7 @@ Ignore unknown `type` values and unknown fields so that additive changes do not 
 | `run_started` | `run_id`, `session_id`, `provider`, `model`, `effort`, `workspace` | Always first. `run_id` names the run directory. |
 | `preflight_warning` | `code`, `message` | A non-blocking preflight finding, such as `auth_expiring`. |
 | `user_message` | `id`, `text` | The runner accepted a user message. `id` is the message ID it deduplicates on, so it acknowledges delivery of a message sent with that ID. |
+| `developer_message` | `id`, `text` | The runner accepted a developer message: the harness's, not the user's, such as context it prepared. It is not counted in `user_messages`. |
 | `control_input` | `id`, `mode`, `effort`, `reason` | The runner accepted a control message: `settings` (with `effort`), `when_idle`, `hard`, or `heartbeat` (with `reason`). |
 | `turn_started` | `turn`, `turn_id` | The runner sent a request to the model. Turns count from 1; `turn_id` is the runner's ID for the turn. |
 | `model_responded` | `turn`, `turn_id`, `duration_ms`, `usage`, `stop`, `failure` | The model answered. `usage` has `input`, `cached_input`, `cache_write_input`, `output`, and `reasoning` token counts. `stop` and `failure` are omitted when normal. |

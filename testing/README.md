@@ -41,7 +41,7 @@ Add a fixture only from real runner output, and remove local paths and credentia
 | `FAKERUNNER_EXIT` | Exit code after the replay |
 | `FAKERUNNER_HANG` | `1` starts background tools and waits to be killed; `orphan` starts them and exits |
 | `FAKERUNNER_CAPTURE` | A directory that receives `stdin.json`, `env.txt`, and the pids of started tools |
-| `FAKERUNNER_ECHO` | `1` first writes an input item for each request message, the way the runner acknowledges delivery |
+| `FAKERUNNER_ECHO` | `1` first writes an input item for each request message, the way the runner acknowledges delivery: `developer` for a developer message, else `external` |
 
 The background tools are one child in the runner's process group and one in its own group, recorded in the session file the way the real runner records operations.
 That lets the tests prove that timeouts, interrupts, and runner exits leave no process behind.

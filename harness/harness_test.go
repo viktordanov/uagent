@@ -415,11 +415,45 @@ func TestRun_Messages(t *testing.T) {
 		assert.Equal(t, []string{firstID, "b2c3d4e5-0000-4000-8000-000000000002", "7cb42beb-329b-4c7b-8c2f-abced68ef095"}, acked)
 	})
 
+	t.Run("developer messages reach the runner with their role and are not user messages", func(t *testing.T) {
+		e := newTestEnv(t, "simple.jsonl")
+		t.Setenv("FAKERUNNER_ECHO", "1")
+
+		result, err := e.run(t, context.Background(), func(r *core.Request) {
+			r.Prompt = ""
+			r.Messages = []core.UserInput{
+				{ID: "b2c3d4e5-0000-4000-8000-000000000001", Text: "context", Role: core.RoleDeveloper},
+				{ID: "b2c3d4e5-0000-4000-8000-000000000002", Text: "hello"},
+			}
+		})
+
+		require.NoError(t, err)
+		stdin, err := os.ReadFile(filepath.Join(e.capture, "stdin.json"))
+		require.NoError(t, err)
+		assert.JSONEq(t, `[{"role":"developer","content":"context","message_id":"b2c3d4e5-0000-4000-8000-000000000001"},`+
+			`{"role":"user","content":"hello","message_id":"b2c3d4e5-0000-4000-8000-000000000002"}]`,
+			jsonField(t, stdin, "messages"))
+		var developer []core.DeveloperMessage
+		for _, ev := range e.events {
+			if m, ok := ev.(core.DeveloperMessage); ok {
+				developer = append(developer, core.DeveloperMessage{ID: m.ID, Text: m.Text})
+			}
+		}
+		assert.Equal(t, []core.DeveloperMessage{{ID: "b2c3d4e5-0000-4000-8000-000000000001", Text: "context"}}, developer)
+		assert.Equal(t, 2, result.Stats.UserMessages, "the echoed user message and the fixture's")
+	})
+
 	t.Run("invalid requests are rejected before anything starts", func(t *testing.T) {
 		tests := map[string]func(*core.Request){
 			"prompt and messages": func(r *core.Request) { r.Messages = []core.UserInput{{Text: "x"}} },
 			"neither":             func(r *core.Request) { r.Prompt = "" },
 			"empty message":       func(r *core.Request) { r.Prompt, r.Messages = "", []core.UserInput{{Text: " "}} },
+			"unknown role": func(r *core.Request) {
+				r.Prompt, r.Messages = "", []core.UserInput{{Text: "x", Role: "system"}}
+			},
+			"developer only": func(r *core.Request) {
+				r.Prompt, r.Messages = "", []core.UserInput{{Text: "x", Role: core.RoleDeveloper}}
+			},
 		}
 		for name, mod := range tests {
 			t.Run(name, func(t *testing.T) {
