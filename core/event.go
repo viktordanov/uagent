@@ -34,6 +34,15 @@ type UserMessage struct {
 	Text string
 }
 
+// DeveloperMessage is a developer message the runner accepted from the
+// harness (core.RoleDeveloper). It is not the user's and is not counted as
+// one.
+type DeveloperMessage struct {
+	At   time.Time
+	ID   string
+	Text string
+}
+
 // ControlInput is a control message the runner accepted: "settings" (with
 // Effort), "when_idle", "hard", or "heartbeat" (with Reason).
 type ControlInput struct {
@@ -125,6 +134,7 @@ type RunFinished struct {
 func (e RunStarted) OccurredAt() time.Time       { return e.At }
 func (e PreflightWarning) OccurredAt() time.Time { return e.At }
 func (e UserMessage) OccurredAt() time.Time      { return e.At }
+func (e DeveloperMessage) OccurredAt() time.Time { return e.At }
 func (e ControlInput) OccurredAt() time.Time     { return e.At }
 func (e TurnStarted) OccurredAt() time.Time      { return e.At }
 func (e ModelResponded) OccurredAt() time.Time   { return e.At }

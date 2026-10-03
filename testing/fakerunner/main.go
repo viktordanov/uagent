@@ -50,6 +50,7 @@ func run(sessionDir string) (int, error) {
 	var req struct {
 		SessionID string `json:"session_id"`
 		Messages  []struct {
+			Role      string `json:"role"`
 			Content   string `json:"content"`
 			MessageID string `json:"message_id"`
 		} `json:"messages"`
@@ -74,9 +75,13 @@ func run(sessionDir string) (int, error) {
 			if err != nil {
 				return 0, err
 			}
+			kind := "external"
+			if m.Role == "developer" {
+				kind = "developer"
+			}
 			item, err := json.Marshal(echoItem{
 				RecordedAt: time.Now().UTC(), Kind: "input",
-				Data: echoInput{ID: m.MessageID, Kind: "external", Payload: payload},
+				Data: echoInput{ID: m.MessageID, Kind: kind, Payload: payload},
 			})
 			if err != nil {
 				return 0, err

@@ -8,11 +8,24 @@ import (
 	"time"
 )
 
-// UserInput is one user message with the ID the runner deduplicates on.
+// UserInput is one input message with the ID the runner deduplicates on.
+// Role is empty or RoleUser for the user's message.
 type UserInput struct {
 	ID   string
 	Text string
+	Role Role
 }
+
+// Role says whose an input message is.
+type Role string
+
+const (
+	RoleUser Role = "user"
+	// RoleDeveloper marks the harness's own message, such as context it
+	// prepares for the session. The model reads it as a developer message;
+	// it is not a user turn and goes with the next user message.
+	RoleDeveloper Role = "developer"
+)
 
 // Request is one task for uah-core-runner plus the guards around it.
 // Set either Prompt or Messages.
@@ -21,7 +34,7 @@ type Request struct {
 	SessionID string
 	Prompt    string
 	// Messages are delivered in order with their IDs, so the runner can
-	// acknowledge each one and ignore repeats.
+	// acknowledge each one and ignore repeats. At least one is the user's.
 	Messages        []UserInput
 	Provider        string
 	Model           string

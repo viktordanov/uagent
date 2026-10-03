@@ -239,16 +239,14 @@ func (d *Decoder) statusEvents(at time.Time, callID string, status callStatusDTO
 	return events
 }
 
-// inputEvents turns a persisted inbox input into a UserMessage or ControlInput.
+// inputEvents turns a persisted inbox input into a UserMessage,
+// DeveloperMessage, or ControlInput.
 func inputEvents(at time.Time, in inputDTO) []core.Event {
 	switch in.Kind {
 	case "external":
-		var text string
-		if err := json.Unmarshal(in.Payload, &text); err != nil {
-			text = string(in.Payload)
-		}
-
-		return []core.Event{core.UserMessage{At: at, ID: in.ID, Text: text}}
+		return []core.Event{core.UserMessage{At: at, ID: in.ID, Text: inputText(in.Payload)}}
+	case "developer":
+		return []core.Event{core.DeveloperMessage{At: at, ID: in.ID, Text: inputText(in.Payload)}}
 	case "control":
 		var c controlDTO
 		if err := json.Unmarshal(in.Payload, &c); err != nil {
@@ -261,6 +259,17 @@ func inputEvents(at time.Time, in inputDTO) []core.Event {
 	}
 
 	return nil
+}
+
+// inputText is a message input's text: its JSON string payload, else the
+// payload as is.
+func inputText(payload json.RawMessage) string {
+	var text string
+	if err := json.Unmarshal(payload, &text); err != nil {
+		return string(payload)
+	}
+
+	return text
 }
 
 // shellPaths returns a shell operation's output files. The runner reports
