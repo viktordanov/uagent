@@ -254,6 +254,29 @@ func TestRun_Preflight(t *testing.T) {
 		assert.Equal(t, core.FindingDotenvRisky, warning.Code)
 		assert.Len(t, result.Stats.Warnings, 1)
 	})
+
+	t.Run("a workspace holding the state directory blocks the run", func(t *testing.T) {
+		e := newTestEnv(t, "simple.jsonl")
+
+		_, err := e.run(t, context.Background(), func(r *core.Request) { r.Workspace = filepath.Dir(e.stateDir) })
+
+		require.ErrorIs(t, err, harness.ErrPreflightBlocked)
+		assert.ErrorContains(t, err, "inside the workspace")
+	})
+
+	t.Run("allow-state-in-workspace turns it into a warning event", func(t *testing.T) {
+		e := newTestEnv(t, "simple.jsonl")
+
+		result, err := e.run(t, context.Background(), func(r *core.Request) {
+			r.Workspace, r.AllowStateInWorkspace = filepath.Dir(e.stateDir), true
+		})
+
+		require.NoError(t, err)
+		assert.Equal(t, core.StatusOK, result.Status)
+		warning, ok := e.events[1].(core.PreflightWarning)
+		require.True(t, ok)
+		assert.Equal(t, core.FindingStateInWorkspace, warning.Code)
+	})
 }
 
 func TestHistory(t *testing.T) {

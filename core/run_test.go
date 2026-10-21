@@ -50,6 +50,17 @@ func TestTriage(t *testing.T) {
 		assert.Equal(t, []core.Finding{auth}, blocking)
 		assert.Equal(t, []core.Finding{dotenv}, warnings)
 	})
+
+	t.Run("the request's allowances downgrade their findings", func(t *testing.T) {
+		state := core.Finding{Code: core.FindingStateInWorkspace, Severity: core.SeverityBlocking, Message: "state inside"}
+
+		blocking, warnings := core.TriageRequest([]core.Finding{dotenv, state, auth}, core.Request{AllowStateInWorkspace: true})
+		assert.Equal(t, []core.Finding{dotenv, auth}, blocking)
+		assert.Equal(t, []core.Finding{state}, warnings)
+
+		blocking, _ = core.TriageRequest([]core.Finding{dotenv, state, auth}, core.Request{AllowDotenv: true, AllowStateInWorkspace: true})
+		assert.Equal(t, []core.Finding{auth}, blocking)
+	})
 }
 
 func TestNewRunID(t *testing.T) {

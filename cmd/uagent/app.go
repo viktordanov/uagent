@@ -115,6 +115,7 @@ func runFlags() []cli.Flag {
 		&cli.BoolFlag{Name: "quiet", Aliases: []string{"q"}, Usage: "no progress output, summary only"},
 		&cli.BoolFlag{Name: "verbose", Usage: "also show reasoning summaries"},
 		&cli.BoolFlag{Name: "allow-dotenv", Usage: "run even if the workspace .env sets UAH_LLM_*, proxy, or Codex auth variables"},
+		&cli.BoolFlag{Name: "allow-state-in-workspace", Usage: "run even if the workspace holds the state directory, such as the home directory"},
 		&cli.StringFlag{Name: "log-level", Usage: "diagnostic log level on stderr: debug, info, warn, error", Value: "warn", Validator: oneOfMap("log-level", logLevels)},
 	}
 }
@@ -151,18 +152,19 @@ func runAction(ctx context.Context, cmd *cli.Command) error {
 	h := harness.New(harness.Config{RunnerPath: bin, StateDir: stateDir, MaxDisk: maxDisk, Logger: logger})
 
 	req := core.Request{
-		SessionID:       cmd.String("session"),
-		Prompt:          prompt,
-		Provider:        provider,
-		Model:           model,
-		Effort:          cmd.String("effort"),
-		BaseURL:         cmd.String("base-url"),
-		SystemPrompt:    cmd.String("system-prompt"),
-		DisallowedTools: cmd.StringSlice("disallow"),
-		MaxAttempts:     cmd.Int("max-attempts"),
-		Workspace:       workspace,
-		Timeout:         cmd.Duration("timeout"),
-		AllowDotenv:     cmd.Bool("allow-dotenv"),
+		SessionID:             cmd.String("session"),
+		Prompt:                prompt,
+		Provider:              provider,
+		Model:                 model,
+		Effort:                cmd.String("effort"),
+		BaseURL:               cmd.String("base-url"),
+		SystemPrompt:          cmd.String("system-prompt"),
+		DisallowedTools:       cmd.StringSlice("disallow"),
+		MaxAttempts:           cmd.Int("max-attempts"),
+		Workspace:             workspace,
+		Timeout:               cmd.Duration("timeout"),
+		AllowDotenv:           cmd.Bool("allow-dotenv"),
+		AllowStateInWorkspace: cmd.Bool("allow-state-in-workspace"),
 	}
 
 	pal := PaletteFor(os.Stderr)

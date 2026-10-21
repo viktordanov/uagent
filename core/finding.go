@@ -13,6 +13,9 @@ const (
 // Preflight finding codes.
 const (
 	FindingWorkspaceMissing = "workspace_missing"
+	// FindingStateInWorkspace marks a workspace that holds the state
+	// directory, whose sessions the agent's own searches can read back.
+	// Request.AllowStateInWorkspace downgrades it to a warning.
 	FindingStateInWorkspace = "state_in_workspace"
 	// FindingDotenvRisky marks a workspace .env that can redirect the model
 	// endpoint or credentials. Request.AllowDotenv downgrades it to a warning.
@@ -32,8 +35,15 @@ type Finding struct {
 
 // Triage splits findings into those that block the run and those that only warn.
 func Triage(findings []Finding, allowDotenv bool) (blocking, warnings []Finding) {
+	return TriageRequest(findings, Request{AllowDotenv: allowDotenv})
+}
+
+// TriageRequest is Triage with the request's allowances: AllowDotenv and
+// AllowStateInWorkspace each turn their finding into a warning.
+func TriageRequest(findings []Finding, req Request) (blocking, warnings []Finding) {
 	for _, f := range findings {
-		allowed := f.Code == FindingDotenvRisky && allowDotenv
+		allowed := f.Code == FindingDotenvRisky && req.AllowDotenv ||
+			f.Code == FindingStateInWorkspace && req.AllowStateInWorkspace
 		if f.Severity == SeverityBlocking && !allowed {
 			blocking = append(blocking, f)
 

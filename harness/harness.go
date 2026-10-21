@@ -105,7 +105,7 @@ func (h *Harness) Start(ctx context.Context, req core.Request, sink core.Sink) (
 	if err != nil {
 		return nil, err
 	}
-	blocking, warnings := core.Triage(findings, req.AllowDotenv)
+	blocking, warnings := core.TriageRequest(findings, req)
 	if len(blocking) > 0 {
 		return nil, fmt.Errorf("%w: %s", ErrPreflightBlocked, core.Messages(blocking))
 	}

@@ -46,6 +46,10 @@ type Request struct {
 	Workspace       string
 	Timeout         time.Duration
 	AllowDotenv     bool
+	// AllowStateInWorkspace runs even when the workspace holds the state
+	// directory, such as a session in the home directory with the state
+	// under it, with a warning in place of the block.
+	AllowStateInWorkspace bool
 }
 
 // Result is a finished run.
