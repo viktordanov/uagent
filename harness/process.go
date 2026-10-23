@@ -2,12 +2,14 @@ package harness
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -263,22 +265,21 @@ func liveOperationGroups(sessionFile string, log *slog.Logger) []int {
 		start  string
 	}
 	latest := map[string]opState{}
-	br := bufio.NewReaderSize(f, 1<<20)
-	for {
-		line, err := br.ReadBytes('\n')
+	sc := bufio.NewScanner(f)
+	sc.Buffer(make([]byte, 1<<20), math.MaxInt) // a line can be any length
+	for sc.Scan() {
+		line := sc.Bytes()
 		var rec sessionRecordDTO
-		if json.Unmarshal(line, &rec) == nil && rec.Type == "operation" {
-			op := rec.Data.Operation
-			state := latest[op.ID]
-			state.status = op.Status
-			if op.State.ProcessGroupID != 0 {
-				state.pgid, state.start = op.State.ProcessGroupID, op.State.ProcessGroupStart
-			}
-			latest[op.ID] = state
+		if otherRecord(line) || json.Unmarshal(line, &rec) != nil || rec.Type != "operation" {
+			continue
 		}
-		if err != nil {
-			break
+		op := rec.Data.Operation
+		state := latest[op.ID]
+		state.status = op.Status
+		if op.State.ProcessGroupID != 0 {
+			state.pgid, state.start = op.State.ProcessGroupID, op.State.ProcessGroupStart
 		}
+		latest[op.ID] = state
 	}
 	var groups []int
 	for _, s := range latest {
@@ -298,6 +299,17 @@ func liveOperationGroups(sessionFile string, log *slog.Logger) []int {
 	}
 
 	return groups
+}
+
+// otherRecord reports whether a session file line is a record of a type
+// other than operation, as the runner writes them: {"type":...,"data":...}.
+// Items make up nearly all of a long session's file, so skipping them
+// without decoding keeps the scan cheap. A line written another way is
+// decoded.
+func otherRecord(line []byte) bool {
+	rest, ok := bytes.CutPrefix(line, []byte(`{"type":"`))
+
+	return ok && !bytes.HasPrefix(rest, []byte(`operation"`))
 }
 
 // sameGroup reports whether process group pgid is still the one whose leader
