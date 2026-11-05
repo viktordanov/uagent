@@ -41,8 +41,17 @@ type Config struct {
 	Backend Backend
 	// StateDir holds sessions, logs, and run records; see DefaultStateDir.
 	StateDir string
-	// MaxDisk kills a run when its tool output exceeds this many bytes (0 disables).
+	// MaxDisk kills a run when the tool output its session keeps exceeds
+	// this many bytes (0 disables). The output is every regular file under
+	// the session's operations directory (sessions/operations/<session-id>),
+	// written by this run or an earlier run of the session, except the
+	// entries DiskExclude names. It is measured every 5 seconds.
 	MaxDisk int64
+	// DiskExclude names entries directly in a session's operations directory
+	// that MaxDisk does not count: scratch space a caller keeps there, such as
+	// uah's per-session $TMPDIR ("tmp"). The runner names its operation
+	// directories by operation ID, so the names must not be possible IDs.
+	DiskExclude []string
 	// KillGrace is how long a stopping runner gets before it is killed (default 5s).
 	KillGrace time.Duration
 	// Logger receives diagnostics (default slog.Default()).

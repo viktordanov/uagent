@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -20,10 +21,11 @@ import (
 	"github.com/viktordanov/uagent/internal/procstart"
 )
 
-const (
-	drainTimeout     = 2 * time.Second
-	diskPollInterval = 5 * time.Second
-)
+const drainTimeout = 2 * time.Second
+
+// diskPollInterval is how often supervise measures the session's tool
+// output against Config.MaxDisk; tests shorten it.
+var diskPollInterval = 5 * time.Second
 
 // processExit describes how the runner process ended.
 type processExit struct {
@@ -43,6 +45,8 @@ type process struct {
 	events      *os.File
 	stderr      *os.File
 	readDone    chan struct{}
+	// diskUsage measures the tool output that counts toward Config.MaxDisk.
+	diskUsage func() int64
 }
 
 // startProcess writes the run records (request.json, a running summary.json,
@@ -66,6 +70,7 @@ func (h *Harness) startProcess(ctx context.Context, req core.Request, started ti
 		return nil, err
 	}
 	p := &process{h: h, sessionFile: h.layout.sessionFile(req.SessionID), opsDir: h.layout.operationsDir(req.SessionID)}
+	p.diskUsage = func() int64 { return dirSize(p.opsDir, h.cfg.DiskExclude) }
 	if p.events, err = os.Create(filepath.Join(runDir, EventsFile)); err != nil {
 		return nil, fmt.Errorf("failed to create events file: %w", err)
 	}
@@ -128,9 +133,19 @@ func (p *process) read(ctx context.Context, sink core.Sink) {
 
 // supervise waits for the agent to stop and stops it on an interrupt, a kill,
 // the end of ctx (timeout or cancellation), or a disk overrun.
+//
+// The disk check measures in a goroutine of its own, one scan at a time, so
+// a slow scan never delays the other cases. The result channel has room for
+// one result, so a scan still running when supervise returns can finish.
 func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}) core.Termination {
-	disk := time.NewTicker(diskPollInterval)
-	defer disk.Stop()
+	var poll <-chan time.Time
+	if p.h.cfg.MaxDisk > 0 {
+		disk := time.NewTicker(diskPollInterval)
+		defer disk.Stop()
+		poll = disk.C
+	}
+	measured := make(chan int64, 1)
+	scanning := false
 	for {
 		select {
 		case <-p.agent.Done():
@@ -154,11 +169,14 @@ func (p *process) supervise(ctx context.Context, interrupt, kill <-chan struct{}
 			}
 
 			return core.TerminationInterrupted
-		case <-disk.C:
-			if p.h.cfg.MaxDisk <= 0 {
-				continue
+		case <-poll:
+			if !scanning {
+				scanning = true
+				go func() { measured <- p.diskUsage() }()
 			}
-			if used := dirSize(p.opsDir); used > p.h.cfg.MaxDisk {
+		case used := <-measured:
+			scanning = false
+			if used > p.h.cfg.MaxDisk {
 				p.log.LogAttrs(ctx, slog.LevelInfo, "stopping agent",
 					slog.String("reason", "disk limit"),
 					slog.Int64("used_bytes", used),
@@ -352,11 +370,22 @@ func groupExists(pgid int) bool {
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
 
-func dirSize(dir string) int64 {
+// dirSize is the size of the regular files under dir, a session's
+// operations directory, leaving out the entries directly in dir that
+// exclude names.
+func dirSize(dir string, exclude []string) int64 {
+	dir = filepath.Clean(dir)
 	var size int64
-	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return nil //nolint:nilerr // unreadable entries don't count toward the limit
+		}
+		if path != dir && filepath.Dir(path) == dir && slices.Contains(exclude, d.Name()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+
+			return nil
 		}
 		if info, err := d.Info(); err == nil && info.Mode().IsRegular() {
 			size += info.Size()
